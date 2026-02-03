@@ -1,4 +1,7 @@
 import sharp from 'sharp'
+
+// Disable sharp cache to prevent memory leak
+sharp.cache(false)
 import ExifReader from 'exifreader'
 import type { Photo, PhotoExif } from '../types/shared_types.js'
 import { parse, format } from 'date-fns'

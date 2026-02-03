@@ -5,7 +5,11 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN apk add --no-cache \
     su-exec \
     shadow \
-    bash
+    bash \
+    jemalloc
+
+# Use jemalloc to prevent memory fragmentation in Alpine
+ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
 
 WORKDIR /usr/src/app
 
