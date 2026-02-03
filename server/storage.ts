@@ -137,11 +137,6 @@ class S3Adapter implements StorageAdapter {
                 const content = await readFile(dbPath, 'utf-8')
                 const data = JSON.parse(content)
                 return data.map((item: Photo) => {
-                    const cdn = this.cdnUrl || 'http://dummy.com' // Fallback for relative path construction if needed, OR just return item.src if no CDN
-                    // If cdnUrl is set, we want absolute URL. If not, maybe keep relative?
-                    // Original code: new URL(item.src, Bun.env.S3_CDN_URL ?? '').toString()
-                    // If CDN is empty string, new URL('/foo', '') throws.
-                    
                     if (this.cdnUrl) {
                         const base = this.cdnUrl!;
                          return {
