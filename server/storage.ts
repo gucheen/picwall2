@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
-import path from 'path'
+import path from 'node:path'
 import { mkdir, unlink, access, stat, readFile, writeFile } from 'node:fs/promises'
 import type { Photo } from '../types/shared_types.js'
 import { compareDesc } from 'date-fns'

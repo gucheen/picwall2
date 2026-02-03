@@ -1,5 +1,5 @@
 import { readdir } from 'node:fs/promises';
-import path from 'path';
+import path from 'node:path';
 import { savePhoto } from '../server/photos';
 import { storage } from '../server/storage';
 
