@@ -9,10 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjemalloc2 \
     && rm -rf /var/lib/apt/lists/*
 
-# 创建初始用户
-RUN groupadd -g 1000 appgroup && \
-    useradd -u 1000 -g appgroup -m appuser
-
 WORKDIR /usr/src/app
 
 # 拷贝并设置 entrypoint
