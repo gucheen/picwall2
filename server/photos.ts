@@ -7,6 +7,7 @@ import { storage } from './storage'
 async function generateThumbnailBuffer(originalBuffer: ArrayBuffer | Buffer): Promise<Buffer | ArrayBuffer> {
   try {
     return await sharp(originalBuffer)
+      .rotate() // Auto-rotate based on EXIF
       .resize(600, null, { withoutEnlargement: true })
       .avif({ quality: 75 })
       .toBuffer()
@@ -41,12 +42,23 @@ async function getImageInfo(
         tags['CreateDate']?.description,
     }
 
-    const width = tags['Image Width']?.value
+    let width = tags['Image Width']?.value
       ? Number(tags['Image Width']?.value)
       : undefined
-    const height = tags['Image Height']?.value
+    let height = tags['Image Height']?.value
       ? Number(tags['Image Height']?.value)
       : undefined
+
+    // Check Orientation to swap width/height if needed
+    // Orientation values 5, 6, 7, 8 imply 90 or 270 rotation
+    // 6 = Rotate 90 CW, 8 = Rotate 270 CW
+    const orientation = tags['Orientation']?.value
+    if (width && height && orientation) {
+      const o = Number(orientation)
+      if (o >= 5 && o <= 8) {
+        [width, height] = [height, width]
+      }
+    }
 
     return { exif, width, height }
   } catch (error) {
