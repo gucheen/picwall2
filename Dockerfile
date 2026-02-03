@@ -31,4 +31,4 @@ COPY --from=prerelease /usr/src/app/package.json .
 ENV NODE_ENV=production
 USER bun
 EXPOSE 3000/tcp
-ENTRYPOINT [ "bun", "run", "src/backend/server.ts" ]
+ENTRYPOINT [ "bun", "run", "server/index.ts" ]
