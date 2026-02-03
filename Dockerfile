@@ -1,7 +1,22 @@
 # use the official Bun image
 # see all versions at https://hub.docker.com/r/oven/bun/tags
 FROM oven/bun:1 AS base
+
+# 安装 gosu 和 shadow (用于 usermod)
+RUN apt-get update && apt-get install -y gosu shadow libjemalloc1 && rm -rf /var/lib/apt/lists/*
+
+# 创建初始用户
+RUN groupadd -g 1000 appgroup && \
+    useradd -u 1000 -g appgroup -m appuser
+
 WORKDIR /usr/src/app
+
+# 拷贝并设置 entrypoint
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Change memory allocator to avoid leaks
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.1
 
 # install dependencies into temp directory
 # this will cache them and speed up future builds
@@ -31,6 +46,7 @@ COPY --from=prerelease /usr/src/app/package.json .
 
 # run the app
 ENV NODE_ENV=production
-USER bun
+USER appuser
 EXPOSE 3000/tcp
-ENTRYPOINT [ "bun", "run", "server/index.ts" ]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["bun", "run", "server/index.ts"]

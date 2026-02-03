@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# 获取通过 docker-compose user: 指定的 UID/GID
+# 如果没有指定，默认使用 1000
+USER_ID=${LOCAL_USER_ID:-1000}
+
+echo "Starting with UID : $USER_ID"
+
+# 动态修改内部用户的 UID
+usermod -u $USER_ID appuser
+groupmod -g $USER_ID appgroup
+
+# 确保工作目录归该用户所有
+chown -R appuser:appgroup /usr/src/app
+
+# 使用 gosu 切换到 appuser 并执行后续命令（即 CMD）
+exec /usr/sbin/gosu appuser "$@"
