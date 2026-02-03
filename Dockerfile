@@ -11,9 +11,6 @@ RUN apk add --no-cache \
     bash \
     jemalloc
 
-# Use jemalloc to prevent memory fragmentation in Alpine
-ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
-
 WORKDIR /usr/src/app
 
 # 拷贝并设置 entrypoint
@@ -49,8 +46,9 @@ WORKDIR /usr/src/app
 COPY --from=release /temp/prod/node_modules node_modules
 COPY --from=build /usr/src/app/dist dist
 COPY --from=build /usr/src/app/package.json .
-COPY --from=build /usr/src/app/public public 
 
+# Use jemalloc to prevent memory fragmentation in Alpine
+ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
 # run the app
 ENV NODE_ENV=production
 EXPOSE 3000

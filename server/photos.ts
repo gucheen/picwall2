@@ -1,6 +1,6 @@
 import sharp from 'sharp'
 import ExifReader from 'exifreader'
-import type { Photo, PhotoExif } from '../types/shared_types.js'
+import type { Photo, PhotoExif } from '../types/shared_types'
 import { parse, format } from 'date-fns'
 import { storage } from './storage.js'
 

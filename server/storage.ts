@@ -1,7 +1,7 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import path from 'path'
 import { mkdir, unlink, access, stat, readFile, writeFile } from 'node:fs/promises'
-import type { Photo } from '../types/shared_types.js'
+import type { Photo } from '../types/shared_types'
 import { compareDesc } from 'date-fns'
 
 const dbPath = path.join(process.cwd(), 'data', 'photos_db.json')
@@ -25,8 +25,8 @@ export interface StorageAdapter {
 
 // --- Local Adapter ---
 class LocalAdapter implements StorageAdapter {
-    private uploadsDir = path.join(process.cwd(), 'public', 'uploads')
-    private thumbnailsDir = path.join(process.cwd(), 'public', 'thumbnails')
+    private uploadsDir = path.join(process.cwd(), 'files', 'uploads')
+    private thumbnailsDir = path.join(process.cwd(), 'files', 'thumbnails')
 
     constructor() {
         this.ensureDirs()
