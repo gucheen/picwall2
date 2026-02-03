@@ -46,7 +46,7 @@ COPY --from=prerelease /usr/src/app/package.json .
 
 # run the app
 ENV NODE_ENV=production
-USER appuser
+USER bun
 EXPOSE 3000/tcp
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bun", "run", "server/index.ts"]
