@@ -1,0 +1,30 @@
+{
+  "name": "picwall2",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch server/index.ts",
+    "start": "NODE_ENV=production bun run server/index.ts",
+    "build": "bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --define:process.env.NODE_ENV='\"production\"' --env='BUN_PUBLIC_*'"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "exifreader": "^4.36.1",
+    "framer-motion": "^12.30.0",
+    "hono": "^4.11.7",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "sharp": "^0.34.5",
+    "wouter": "^3.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.19.30",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@types/sharp": "^0.32.0",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3"
+  }
+}

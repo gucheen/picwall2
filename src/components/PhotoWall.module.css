@@ -1,0 +1,117 @@
+.container {
+  min-height: 100vh;
+  padding-bottom: 5rem;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background-color: rgba(18, 18, 18, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid #222;
+  padding: 1rem 0;
+}
+
+.headerContent {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 300;
+  letter-spacing: -0.025em;
+  color: #fff;
+}
+
+.uploadInput {
+  display: none;
+}
+
+.uploadLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #fff;
+  color: #000;
+  border-radius: 9999px;
+  /* Pill shape */
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.uploadLabel:hover {
+  transform: scale(1.05);
+}
+
+.uploadLabel:active {
+  transform: scale(0.95);
+}
+
+.uploading {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.signOutButton {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.signOutButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: #fff;
+}
+
+.masonryGrid {
+  max-width: 1600px;
+  margin: 2rem auto 0;
+  padding: 0 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.gridColumn {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  /* Prevents overflow */
+  gap: 1rem;
+  /* Vertical gap between items */
+}
+
+/* 
+   Breakpoints handled in JS now, but we keep container 
+   max-width adjustments if needed. 
+   Currently JS matches: 
+   640px -> 2 cols
+   1024px -> 3 cols
+   1280px -> 4 cols
+*/
+
+.emptyState {
+  text-align: center;
+  padding: 5rem 0;
+  color: #444;
+}
