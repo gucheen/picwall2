@@ -1,8 +1,8 @@
 import sharp from 'sharp'
 import ExifReader from 'exifreader'
-import type { Photo, PhotoExif } from '../types/shared_types'
+import type { Photo, PhotoExif } from '../types/shared_types.js'
 import { parse, format } from 'date-fns'
-import { storage } from './storage'
+import { storage } from './storage.js'
 
 async function generateThumbnailBuffer(originalBuffer: ArrayBuffer | Buffer): Promise<Buffer | ArrayBuffer> {
   try {

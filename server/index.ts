@@ -1,11 +1,12 @@
+import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
+import { readFile } from 'node:fs/promises'
 import { Hono } from 'hono'
 import { csrf } from 'hono/csrf'
 import { secureHeaders } from 'hono/secure-headers'
-import { getPhotos, savePhoto, deletePhoto } from './photos'
-import frontendApp from '../src/index.html'
-import * as auth from './auth'
-import { storage } from './storage'
-
+import { getPhotos, savePhoto, deletePhoto } from './photos.js'
+import * as auth from './auth.js'
+import { storage } from './storage.js'
 
 const app = new Hono()
 
@@ -80,7 +81,10 @@ app.get('/uploads/:filename', async (c) => {
 
   if (file) {
     c.header('Cache-Control', 'public, immutable, max-age=31536000')
-    return new Response(file)
+    // S3Adapter returns a stream/buffer differently now, adjust usage in storage.ts or here.
+    // For Node adapter, returning a Response with Body init (stream/buffer) is fine.
+    // Ensure storage.get returns something compatible with new Response().
+    return new Response(file as any) 
   }
   return c.notFound()
 })
@@ -96,20 +100,29 @@ app.get('/thumbnails/:filename', async (c) => {
 
   if (file) {
     c.header('Cache-Control', 'public, immutable, max-age=31536000')
-    return new Response(file)
+    return new Response(file as any)
   }
   return c.notFound()
 })
 
-Bun.serve({
-  routes: {
-    '/': frontendApp,         // React app for all other routes
-    '/admin': frontendApp,
-  },
-  fetch: app.fetch,
-  development: process.env.NODE_ENV !== 'production' ? {
-    hmr: false,
-  } : false,
-})
+// Production: Serve static assets from dist/public (built by Vite)
+if (process.env.NODE_ENV === 'production') {
+  app.use('/*', serveStatic({ root: './dist/public' }))
+  
+  // SPA Fallback
+  app.get('*', async (c) => {
+     try {
+       return c.html(await readFile('./dist/public/index.html', 'utf-8'))
+     } catch(e) {
+       return c.text('Not Found', 404)
+     }
+  })
+}
 
-console.log('Server running at http://localhost:3000')
+const port = 3000
+console.log(`Server running at http://localhost:${port}`)
+
+serve({
+  fetch: app.fetch,
+  port,
+})

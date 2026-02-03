@@ -1,17 +1,26 @@
-import { S3Client } from 'bun'
-import type { S3File, BunFile } from 'bun'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import path from 'path'
-import { mkdir, readdir, unlink } from 'node:fs/promises'
-import type { Photo } from '../types/shared_types'
+import { mkdir, unlink, access, stat, readFile, writeFile } from 'node:fs/promises'
+import type { Photo } from '../types/shared_types.js'
 import { compareDesc } from 'date-fns'
 
 const dbPath = path.join(process.cwd(), 'data', 'photos_db.json')
+
+// Helper to check file existence
+async function fileExists(filePath: string): Promise<boolean> {
+    try {
+        await access(filePath)
+        return true
+    } catch {
+        return false
+    }
+}
 
 export interface StorageAdapter {
     list(): Promise<Photo[]>
     save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void>
     delete(id: string): Promise<boolean>
-    get(filename: string, type: 'uploads' | 'thumbnails'): Promise<BunFile | S3File | null>
+    get(filename: string, type: 'uploads' | 'thumbnails'): Promise<Buffer | ReadableStream | null> // Return compatible with Response body
 }
 
 // --- Local Adapter ---
@@ -24,38 +33,19 @@ class LocalAdapter implements StorageAdapter {
     }
 
     private async ensureDirs() {
-        if (!(await Bun.file(this.uploadsDir).exists())) {
+        if (!(await fileExists(this.uploadsDir))) {
             await mkdir(this.uploadsDir, { recursive: true })
         }
-        if (!(await Bun.file(this.thumbnailsDir).exists())) {
+        if (!(await fileExists(this.thumbnailsDir))) {
             await mkdir(this.thumbnailsDir, { recursive: true })
         }
     }
 
     async list(): Promise<Photo[]> {
-        // For Local, we re-scan directories to be robust
-        // This requires re-reading EXIF which is slow, but consistent with original "Local" behavior
-        // Ideally we'd optimize, but let's stick to correctness first.
-        // To avoid circular dependency, we might need to pass an "ExifReader" or do it here.
-        // Getting EXIF here duplicates logic from photos.ts. 
-        // BETTER: photos.ts passes the "Read Info" function? Or LocalAdapter just returns filenames?
-        // Architecture decision: Adapter returns Photo objects.
-        // So LocalAdapter needs to be able to read EXIF.
-        // Let's rely on cached db.json even for local? 
-        // Original implementation did NOT have db.json.
-        // Let's import the helper functions if needed, or better, implement a simpler list 
-        // that relies on the caller to enrich? No, `getPhotos` expects `Photo[]`.
-
-        // RE-IMPLEMENTING "Fast-enough" Local list:
-        // We will try to read `photos_db.json` locally too! This unifies the architecture.
-        // If `photos_db.json` missing, we can regenerate it (self-healing), but for now start empty or try to migrate.
-        // MIGRATION: If we switch to Local with DB, we should probably scan once.
-        // Let's use `photos_db.json` for Local too. It's much better.
-
-        const dbFile = Bun.file(dbPath)
-        if (await dbFile.exists()) {
+        if (await fileExists(dbPath)) {
             try {
-                return await dbFile.json()
+                const content = await readFile(dbPath, 'utf-8')
+                return JSON.parse(content)
             } catch (e) {
                 console.error("Local DB read error", e)
             }
@@ -65,18 +55,28 @@ class LocalAdapter implements StorageAdapter {
 
     async save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
         await this.ensureDirs()
-        await Bun.write(path.join(this.uploadsDir, filename), original)
-        await Bun.write(path.join(this.thumbnailsDir, `thumb_${filename}.avif`), thumbnail)
+        
+        // Convert Blob to Buffer if needed
+        let originalBuf: Buffer | Uint8Array
+        if (original instanceof Blob) {
+            originalBuf = Buffer.from(await original.arrayBuffer())
+        } else if (original instanceof ArrayBuffer) {
+           originalBuf = Buffer.from(original)
+        } else {
+            originalBuf = original
+        }
+
+        // Ensure thumbnail is Buffer
+        const thumbnailBuf = Buffer.isBuffer(thumbnail) ? thumbnail : Buffer.from(thumbnail)
+
+        await writeFile(path.join(this.uploadsDir, filename), originalBuf)
+        await writeFile(path.join(this.thumbnailsDir, `thumb_${filename}.avif`), thumbnailBuf)
 
         // Update DB
-        const dbFile = Bun.file(dbPath)
-        let photos: Photo[] = []
-        if (await dbFile.exists()) {
-            try { photos = await dbFile.json() } catch { }
-        }
+        let photos: Photo[] = await this.list()
         photos.push(metadata)
         photos.sort((a, b) => a.date && b.date ? compareDesc(a.date, b.date) : 0)
-        await Bun.write(dbPath, JSON.stringify(photos, null, 2))
+        await writeFile(dbPath, JSON.stringify(photos, null, 2))
     }
 
     async delete(id: string): Promise<boolean> {
@@ -84,16 +84,14 @@ class LocalAdapter implements StorageAdapter {
             const original = path.join(this.uploadsDir, id)
             const thumb = path.join(this.thumbnailsDir, `thumb_${id}.avif`)
 
-            if (await Bun.file(original).exists()) await unlink(original)
-            if (await Bun.file(thumb).exists()) await unlink(thumb)
+            if (await fileExists(original)) await unlink(original)
+            if (await fileExists(thumb)) await unlink(thumb)
 
             // Update DB
-            const dbFile = Bun.file(dbPath)
-            if (await dbFile.exists()) {
-                let photos = await dbFile.json() as Photo[]
-                photos = photos.filter(p => p.id !== id)
-                await Bun.write(dbPath, JSON.stringify(photos, null, 2))
-            }
+            let photos = await this.list()
+            photos = photos.filter(p => p.id !== id)
+            await writeFile(dbPath, JSON.stringify(photos, null, 2))
+            
             return true
         } catch (e) {
             console.error("Local delete failed", e)
@@ -101,38 +99,58 @@ class LocalAdapter implements StorageAdapter {
         }
     }
 
-    async get(filename: string, type: 'uploads' | 'thumbnails'): Promise<BunFile | null> {
+    async get(filename: string, type: 'uploads' | 'thumbnails'): Promise<Buffer | null> {
         const folder = type === 'uploads' ? this.uploadsDir : this.thumbnailsDir
-        const file = Bun.file(path.join(folder, filename))
-        return (await file.exists()) ? file : null
+        const filePath = path.join(folder, filename)
+        if (await fileExists(filePath)) {
+            return await readFile(filePath)
+        }
+        return null
     }
 }
 
 // --- S3 Adapter ---
 class S3Adapter implements StorageAdapter {
     private client: S3Client
+    private bucket: string
+    private endpoint: string
+    private cdnUrl: string
 
     constructor() {
         this.client = new S3Client({
-            accessKeyId: Bun.env.S3_ACCESS_KEY_ID,
-            secretAccessKey: Bun.env.S3_SECRET_ACCESS_KEY,
-            bucket: Bun.env.S3_BUCKET,
-            endpoint: Bun.env.S3_ENDPOINT,
+            region: 'auto', // Cloudflare R2 or Generic S3 often needs a region
+            endpoint: process.env.S3_ENDPOINT,
+            credentials: {
+                accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+                secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+            }
         })
+        this.bucket = process.env.S3_BUCKET!
+        this.endpoint = process.env.S3_ENDPOINT!
+        this.cdnUrl = process.env.S3_CDN_URL ?? ''
     }
 
     async list(): Promise<Photo[]> {
         // Use local DB even for S3
-        const dbFile = Bun.file(dbPath)
-        if (await dbFile.exists()) {
+        if (await fileExists(dbPath)) {
             try {
-                const data = await dbFile.json()
+                const content = await readFile(dbPath, 'utf-8')
+                const data = JSON.parse(content)
                 return data.map((item: Photo) => {
-                    return {
-                        ...item,
-                        thumbnailSrc: new URL(item.thumbnailSrc, Bun.env.S3_CDN_URL ?? '').toString(),
-                        src: new URL(item.src, Bun.env.S3_CDN_URL ?? '').toString(),
+                    const cdn = this.cdnUrl || 'http://dummy.com' // Fallback for relative path construction if needed, OR just return item.src if no CDN
+                    // If cdnUrl is set, we want absolute URL. If not, maybe keep relative?
+                    // Original code: new URL(item.src, Bun.env.S3_CDN_URL ?? '').toString()
+                    // If CDN is empty string, new URL('/foo', '') throws.
+                    
+                    if (this.cdnUrl) {
+                        const base = this.cdnUrl!;
+                         return {
+                            ...item,
+                            thumbnailSrc: item.thumbnailSrc ? new URL(item.thumbnailSrc, base).toString() : undefined,
+                            src: new URL(item.src, base).toString(),
+                        }
                     }
+                    return item
                 })
             } catch (e) { console.error("Local DB read error (S3 mode)", e) }
         }
@@ -140,34 +158,56 @@ class S3Adapter implements StorageAdapter {
     }
 
     async save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
-        await this.client.write(`uploads/${filename}`, original)
-        await this.client.write(`thumbnails/thumb_${filename}.avif`, thumbnail)
+        // Convert Blob to Buffer/Uint8Array for upload
+        let body: Buffer | Uint8Array
+        if (original instanceof Blob) {
+             body = Buffer.from(await original.arrayBuffer())
+        } else if (original instanceof ArrayBuffer) {
+             body = Buffer.from(original)
+        } else {
+             body = original
+        }
+
+        await this.client.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: `uploads/${filename}`,
+            Body: body,
+            ContentType: 'image/jpeg' // Or detect mime type?
+        }))
+
+        await this.client.send(new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: `thumbnails/thumb_${filename}.avif`,
+            Body: Buffer.isBuffer(thumbnail) ? thumbnail : Buffer.from(thumbnail),
+            ContentType: 'image/avif'
+        }))
 
         // Update Local DB
-        const dbFile = Bun.file(dbPath)
         let photos: Photo[] = []
-        if (await dbFile.exists()) {
-            try { photos = await dbFile.json() } catch { }
+        if (await fileExists(dbPath)) {
+            try { photos = JSON.parse(await readFile(dbPath, 'utf-8')) } catch { }
         }
         photos.push(metadata)
         photos.sort((a, b) => a.date && b.date ? compareDesc(a.date, b.date) : 0)
-        await Bun.write(dbPath, JSON.stringify(photos, null, 2))
+        await writeFile(dbPath, JSON.stringify(photos, null, 2))
     }
 
     async delete(id: string): Promise<boolean> {
         try {
-            const original = this.client.file(`uploads/${id}`)
-            const thumbAvif = this.client.file(`thumbnails/thumb_${id}.avif`)
-
-            if (await original.exists()) await original.delete()
-            if (await thumbAvif.exists()) await thumbAvif.delete()
+            await this.client.send(new DeleteObjectCommand({
+                Bucket: this.bucket,
+                Key: `uploads/${id}`
+            }))
+            await this.client.send(new DeleteObjectCommand({
+                Bucket: this.bucket,
+                Key: `thumbnails/thumb_${id}.avif`
+            }))
 
             // Update Local DB
-            const dbFile = Bun.file(dbPath)
-            if (await dbFile.exists()) {
-                let photos = await dbFile.json() as Photo[]
+            if (await fileExists(dbPath)) {
+                let photos = JSON.parse(await readFile(dbPath, 'utf-8')) as Photo[]
                 photos = photos.filter(p => p.id !== id)
-                await Bun.write(dbPath, JSON.stringify(photos, null, 2))
+                await writeFile(dbPath, JSON.stringify(photos, null, 2))
             }
             return true
         } catch (e) {
@@ -176,14 +216,23 @@ class S3Adapter implements StorageAdapter {
         }
     }
 
-    async get(filename: string, type: 'uploads' | 'thumbnails'): Promise<S3File | null> {
-        const file = this.client.file(`${type}/${filename}`)
-        return (await file.exists()) ? file : null
+    async get(filename: string, type: 'uploads' | 'thumbnails'): Promise<ReadableStream | null> {
+         try {
+            const command = new GetObjectCommand({
+                Bucket: this.bucket,
+                Key: `${type}/${filename}`
+            })
+            const response = await this.client.send(command)
+            // response.Body is a stream in Node.js
+            return response.Body as unknown as ReadableStream
+         } catch (e) {
+             return null
+         }
     }
 }
 
 // --- Factory ---
-const type = Bun.env.STORAGE_TYPE === 's3' ? 's3' : 'local'
+const type = process.env.STORAGE_TYPE === 's3' ? 's3' : 'local'
 console.log(`Using Storage Adapter: ${type.toUpperCase()}`)
 
 export const storage = type === 's3' ? new S3Adapter() : new LocalAdapter()

@@ -1,13 +1,15 @@
 import { Context, Next } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
+import { readFile, writeFile, access } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 
-// Environment variables should be loaded by Bun automatically from .env.local
-const CLIENT_ID = Bun.env.POCKETID_CLIENT_ID!
-const CLIENT_SECRET = Bun.env.POCKETID_CLIENT_SECRET!
-const ISSUER = Bun.env.POCKETID_ISSUER! // e.g., https://auth.example.com
-const BASE_URL = Bun.env.BASE_URL || 'http://localhost:3000'
+// Environment variables
+const CLIENT_ID = process.env.POCKETID_CLIENT_ID!
+const CLIENT_SECRET = process.env.POCKETID_CLIENT_SECRET!
+const ISSUER = process.env.POCKETID_ISSUER! // e.g., https://auth.example.com
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000'
 const REDIRECT_URI = `${BASE_URL}/api/auth/callback`
-const ADMIN_EMAIL = Bun.env.ADMIN_EMAIL!
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL!
 
 // Simple in-memory session store (dictionary) for demonstration.
 // In production, use Redis or a database if scaling horizontally.
@@ -17,11 +19,20 @@ let sessions: Record<string, any> = {}
 // Load sessions from file on startup
 const SESSION_FILE = './.sessions.json'
 
+async function fileExists(path: string) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function loadSessions() {
   try {
-    if (await Bun.file(SESSION_FILE).exists()) {
-      const data = await Bun.file(SESSION_FILE).json()
-      sessions = data
+    if (await fileExists(SESSION_FILE)) {
+      const data = await readFile(SESSION_FILE, 'utf-8')
+      sessions = JSON.parse(data)
       console.log(`Loaded ${Object.keys(sessions).length} sessions from disk.`)
     }
   } catch (e) {
@@ -31,7 +42,7 @@ async function loadSessions() {
 
 async function saveSessions() {
   try {
-    await Bun.write(SESSION_FILE, JSON.stringify(sessions, null, 2))
+    await writeFile(SESSION_FILE, JSON.stringify(sessions, null, 2))
   } catch (e) {
     console.error('Failed to save sessions:', e)
   }
@@ -97,13 +108,13 @@ export async function callback(c: Context) {
     }
 
     // Create Session
-    const sessionId = Bun.randomUUIDv7()
+    const sessionId = randomUUID()
     sessions[sessionId] = user
     await saveSessions()
 
     setCookie(c, 'session_id', sessionId, {
       httpOnly: true,
-      secure: Bun.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'Strict',
       path: '/',
       maxAge: 3600 * 24 * 7, // 7 days
