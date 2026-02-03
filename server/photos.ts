@@ -94,7 +94,7 @@ export async function savePhoto(file: File): Promise<string> {
       : undefined,
   }
 
-  await storage.save(fileName, buffer, thumbnailBuffer, newPhoto)
+  await storage.save(fileName, file, thumbnailBuffer, newPhoto)
 
   return fileName
 }

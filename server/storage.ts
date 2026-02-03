@@ -1,4 +1,5 @@
-import { S3Client, S3File, BunFile } from 'bun'
+import { S3Client } from 'bun'
+import type { S3File, BunFile } from 'bun'
 import path from 'path'
 import { mkdir, readdir, unlink } from 'node:fs/promises'
 import type { Photo } from '../types/shared_types'
@@ -8,7 +9,7 @@ const dbPath = path.join(process.cwd(), 'data', 'photos_db.json')
 
 export interface StorageAdapter {
     list(): Promise<Photo[]>
-    save(filename: string, original: ArrayBuffer, thumbnail: ArrayBuffer, metadata: Photo): Promise<void>
+    save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void>
     delete(id: string): Promise<boolean>
     get(filename: string, type: 'uploads' | 'thumbnails'): Promise<BunFile | S3File | null>
 }
@@ -62,7 +63,7 @@ class LocalAdapter implements StorageAdapter {
         return []
     }
 
-    async save(filename: string, original: ArrayBuffer | Buffer, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
+    async save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
         await this.ensureDirs()
         await Bun.write(path.join(this.uploadsDir, filename), original)
         await Bun.write(path.join(this.thumbnailsDir, `thumb_${filename}.avif`), thumbnail)
@@ -126,11 +127,11 @@ class S3Adapter implements StorageAdapter {
         if (await dbFile.exists()) {
             try {
                 const data = await dbFile.json()
-                return data.map(item => {
+                return data.map((item: Photo) => {
                     return {
                         ...item,
-                        thumbnailSrc: new URL(item.thumbnailSrc, Bun.env.S3_CDN_URL!).toString(),
-                        src: new URL(item.src, Bun.env.S3_CDN_URL!).toString(),
+                        thumbnailSrc: new URL(item.thumbnailSrc, Bun.env.S3_CDN_URL ?? '').toString(),
+                        src: new URL(item.src, Bun.env.S3_CDN_URL ?? '').toString(),
                     }
                 })
             } catch (e) { console.error("Local DB read error (S3 mode)", e) }
@@ -138,7 +139,7 @@ class S3Adapter implements StorageAdapter {
         return []
     }
 
-    async save(filename: string, original: ArrayBuffer | Buffer, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
+    async save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
         await this.client.write(`uploads/${filename}`, original)
         await this.client.write(`thumbnails/thumb_${filename}.avif`, thumbnail)
 
