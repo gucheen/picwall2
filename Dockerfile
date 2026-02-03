@@ -1,22 +1,18 @@
 # use the official Bun image
 # see all versions at https://hub.docker.com/r/oven/bun/tags
-FROM oven/bun:1 AS base
+FROM oven/bun:1-alpine AS base
 
-# 安装 gosu 和 passwd (用于 usermod)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gosu \
-    passwd \
-    libjemalloc2 \
-    && rm -rf /var/lib/apt/lists/*
+# 安装 su-exec 和 shadow (用于 usermod)
+RUN apk add --no-cache \
+    su-exec \
+    shadow \
+    bash
 
 WORKDIR /usr/src/app
 
 # 拷贝并设置 entrypoint
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# Change memory allocator to avoid leaks
-ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
 # install dependencies into temp directory
 # this will cache them and speed up future builds
