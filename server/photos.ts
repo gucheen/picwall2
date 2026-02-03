@@ -71,12 +71,21 @@ export async function getPhotos(): Promise<Photo[]> {
   return await storage.list()
 }
 
-export async function savePhoto(file: File): Promise<string> {
+// Helper to process image data in a separate scope to allow GC of the input buffer
+async function processImage(file: File) {
   const buffer = await file.arrayBuffer()
-  const fileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-
   const thumbnailBuffer = await generateThumbnailBuffer(buffer)
   const info = await getImageInfo(buffer)
+  return { thumbnailBuffer, info }
+}
+
+export async function savePhoto(file: File): Promise<string> {
+  const fileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+
+  // Process image properties (Thumbnail, EXIF) first.
+  // The large 'buffer' used inside processImage will be garbage collected
+  // after this awaits, as it's not returned or used subsequently.
+  const { thumbnailBuffer, info } = await processImage(file)
 
   const newPhoto: Photo = {
     id: fileName,
@@ -94,6 +103,8 @@ export async function savePhoto(file: File): Promise<string> {
       : undefined,
   }
 
+  // Stream the file directly to storage/S3.
+  // We do NOT have the large 'buffer' in scope here, preventing memory spikes.
   await storage.save(fileName, file, thumbnailBuffer, newPhoto)
 
   return fileName
