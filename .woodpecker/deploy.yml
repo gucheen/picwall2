@@ -3,7 +3,7 @@ when:
     branch: main
 
 steps:
-  build:
+  deploy:
     image: alpine:edge
     commands:
       - apk update && apk add openssh-client shadow-login
