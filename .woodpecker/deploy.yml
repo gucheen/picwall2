@@ -10,7 +10,7 @@ steps:
       - mkdir -p /root/.ssh
       - echo "$KEY" > /root/.ssh/id_ed25519
       - chmod 0600 /root/.ssh/id_ed25519
-      - ssh -i /root/.ssh/id_ed25519 -P $PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $USERNAME@$HOST "$COMMAND"
+      - ssh -i /root/.ssh/id_ed25519 -p $PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $USERNAME@$HOST "$COMMAND"
     when:
       event: [push, manual]
     environment:
