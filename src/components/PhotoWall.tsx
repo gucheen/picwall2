@@ -4,6 +4,7 @@ import type { Photo } from '../../types/shared_types'
 import PhotoCard from './PhotoCard'
 import DetailView from './DetailView'
 import styles from './PhotoWall.module.css'
+import { useSearchParams } from 'wouter'
 
 export default function PhotoWall() {
   const [photos, setPhotos] = useState<Photo[]>([])
@@ -55,13 +56,13 @@ export default function PhotoWall() {
 
   // Distribute photos into columns (Left-to-Right, then Top-to-Bottom order)
   const [tag, setTag] = useState<string | null>(null)
+  const [search] = useSearchParams()
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.has('tag')) {
-      setTag(params.get('tag'))
+    if (search.has('tag')) {
+      setTag(search.get('tag'))
     }
-  }, [])
+  }, [search])
 
   const filteredPhotos = tag
     ? photos.filter((p) => p.tags && p.tags.includes(tag))
@@ -131,6 +132,26 @@ export default function PhotoWall() {
           </div>
         </div>
       </header>
+
+      {/* Tag Filter Status */}
+      {tag && (
+        <div className={styles.filterBar}>
+          <span>
+            Filtering by: <strong>#{tag}</strong>
+          </span>
+          <a
+            href="/"
+            className={styles.clearFilter}
+            onClick={(e) => {
+              e.preventDefault()
+              setTag(null)
+              window.history.pushState({}, '', '/')
+            }}
+          >
+            Clear
+          </a>
+        </div>
+      )}
 
       {/* Grid */}
       <main className={styles.masonryGrid}>
