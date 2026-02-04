@@ -15,11 +15,11 @@ WORKDIR /usr/src/app
 
 FROM base AS install
 RUN mkdir -p /temp/dev
-COPY package.json pnpm-lock.yaml* /temp/dev/
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml /temp/dev/
 RUN cd /temp/dev && pnpm install --frozen-lockfile
 
 RUN mkdir -p /temp/prod
-COPY package.json pnpm-lock.yaml* /temp/prod/
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml /temp/prod/
 RUN cd /temp/prod && pnpm install --prod --frozen-lockfile
 
 FROM install AS build
