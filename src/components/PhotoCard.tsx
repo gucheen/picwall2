@@ -1,13 +1,14 @@
-import { motion } from 'framer-motion'
+import { memo } from 'react'
 import type { Photo } from '../../types/shared_types'
 import styles from './PhotoCard.module.css'
+import { motion } from 'motion/react'
 
 interface PhotoCardProps {
   photo: Photo
   onClick: (photo: Photo) => void
 }
 
-export default function PhotoCard({ photo, onClick }: PhotoCardProps) {
+const PhotoCard = memo(function PhotoCard({ photo, onClick }: PhotoCardProps) {
   const aspectRatio =
     photo.width && photo.height ? `${photo.width} / ${photo.height}` : undefined
 
@@ -16,21 +17,18 @@ export default function PhotoCard({ photo, onClick }: PhotoCardProps) {
   return (
     <div
       id={`photo-card-${photo.id}`}
-      className={`${styles.card} group`} /* Added group manually for legacy support or just in case, though modules handle hover via selector */
+      className={styles.card}
       onClick={() => onClick(photo)}
       style={{ aspectRatio }}
     >
-      {/* <motion.img> supports layoutId for shared element transitions */}
       <motion.img
-        layoutId={`image-${photo.id}`}
         src={displaySrc}
         alt={photo.name}
         className={styles.image}
-        viewport={{ once: true }}
+        loading="lazy"
         initial={{ opacity: 0 }}
         whileInView={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
-        loading='lazy'
+        viewport={{ once: true }}
       />
 
       <div className={styles.overlay}>
@@ -41,4 +39,6 @@ export default function PhotoCard({ photo, onClick }: PhotoCardProps) {
       </div>
     </div>
   )
-}
+})
+
+export default PhotoCard

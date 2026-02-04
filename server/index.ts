@@ -137,7 +137,7 @@ app.get('/thumbnails/:filename', async (c) => {
   return c.notFound()
 })
 
-// Production: Serve static assets from dist/public (built by Vite)
+// Serve Static Assets in Prod
 if (process.env.NODE_ENV === 'production') {
   app.use('/*', serveStatic({ root: './dist/public' }))
   

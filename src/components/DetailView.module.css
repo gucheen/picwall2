@@ -56,15 +56,43 @@
 /* Progress Indicator */
 .progressOverlay {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(0, 0, 0, 0.6);
-  padding: 1rem 2rem;
+  bottom: 2rem;
+  right: 2rem;
+  background-color: #555;
+  padding: 0.5rem 1rem;
   border-radius: 999px;
   backdrop-filter: blur(4px);
   z-index: 20;
   pointer-events: none;
+}
+
+.imageCloseButton {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #333;
+  color: white;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 40px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  transition: background-color 0.2s, opacity 0.2s;
+  opacity: 0;
+}
+
+.imageWrapper:hover .imageCloseButton {
+  opacity: 1;
+}
+
+.imageCloseButton:hover {
+  background-color: #222;
 }
 
 .progressText {
@@ -178,40 +206,41 @@
 
 .navButtonLeft,
 .navButtonRight {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    background: rgba(0, 0, 0, 0.5);
-    color: white;
-    border: none;
-    font-size: 2rem;
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: opacity 0.2s, background 0.2s;
-    user-select: none;
-    z-index: 10;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: #333;
+  color: white;
+  border: none;
+  font-size: 2rem;
+  width: 50px;
+  height: 50px;
+  line-height: 50px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  user-select: none;
+  z-index: 10;
 }
 
 .imageWrapper:hover .navButtonLeft,
 .imageWrapper:hover .navButtonRight {
-    opacity: 1;
+  opacity: 1;
 }
 
 .navButtonLeft:hover,
 .navButtonRight:hover {
-    background: rgba(0, 0, 0, 0.8);
+  background-color: #222;
 }
 
 .navButtonLeft {
-    left: 20px;
+  left: 0;
 }
 
 .navButtonRight {
-    right: 20px;
+  right: 0;
 }

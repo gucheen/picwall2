@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { AnimatePresence } from 'framer-motion'
+import { AnimatePresence } from 'motion/react'
 import type { Photo } from '../../types/shared_types'
 import PhotoCard from './PhotoCard'
 import DetailView from './DetailView'
@@ -63,8 +63,8 @@ export default function PhotoWall() {
     }
   }, [])
 
-  const filteredPhotos = tag 
-    ? photos.filter(p => p.tags && p.tags.includes(tag))
+  const filteredPhotos = tag
+    ? photos.filter((p) => p.tags && p.tags.includes(tag))
     : photos
 
   /* Shortest-column-first distribution */
@@ -81,10 +81,9 @@ export default function PhotoWall() {
     // Estimate height. Default assumption 1.0 aspect ratio if missing
     // We only care about relative height, so we divide height by width (inverse of aspect ratio)
     // or just 1 if undefined.
-    const aspectRatio = (photo.width && photo.height) 
-      ? (photo.height / photo.width) 
-      : 1
-      
+    const aspectRatio =
+      photo.width && photo.height ? photo.height / photo.width : 1
+
     columnHeights[colIndex] += aspectRatio
   })
 
@@ -93,21 +92,23 @@ export default function PhotoWall() {
   // Scroll current photo into view when selected changes
   useEffect(() => {
     if (selectedId) {
-        const el = document.getElementById(`photo-card-${selectedId}`)
-        if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
+      const el = document.getElementById(`photo-card-${selectedId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
     }
   }, [selectedId])
 
   return (
     <div className={styles.container}>
       {/* ... header and grid ... */}
-      
+
       {/* Header / Upload */}
       <header className={styles.header}>
         <div className={styles.headerContent}>
-          <a href="/"><h1 className={styles.title}>PicWall</h1></a>
+          <a href="/">
+            <h1 className={styles.title}>PicWall</h1>
+          </a>
           <div
             style={{
               display: 'flex',
@@ -140,7 +141,9 @@ export default function PhotoWall() {
                 <PhotoCard
                   key={photo.id}
                   photo={photo}
-                  onClick={() => setSelectedId(photo.id)}
+                  onClick={() => {
+                    setSelectedId(photo.id)
+                  }}
                 />
               ))}
             </div>
@@ -164,20 +167,28 @@ export default function PhotoWall() {
         {selectedId && selectedPhoto && (
           <DetailView
             photo={selectedPhoto}
-            onClose={() => setSelectedId(null)}
+            onClose={() => {
+              setSelectedId(null)
+            }}
             onNext={() => {
-                const currentIndex = filteredPhotos.findIndex(p => p.id === selectedId)
-                if (currentIndex < filteredPhotos.length - 1) {
-                    const nextPhoto = filteredPhotos[currentIndex + 1]
-                    if (nextPhoto) setSelectedId(nextPhoto.id)
-                }
+              const currentIndex = filteredPhotos.findIndex(
+                (p) => p.id === selectedId,
+              )
+              if (currentIndex < filteredPhotos.length - 1) {
+                const nextPhoto = filteredPhotos[currentIndex + 1]
+                if (!nextPhoto) return
+                setSelectedId(nextPhoto.id)
+              }
             }}
             onPrev={() => {
-                const currentIndex = filteredPhotos.findIndex(p => p.id === selectedId)
-                if (currentIndex > 0) {
-                    const prevPhoto = filteredPhotos[currentIndex - 1]
-                    if (prevPhoto) setSelectedId(prevPhoto.id)
-                }
+              const currentIndex = filteredPhotos.findIndex(
+                (p) => p.id === selectedId,
+              )
+              if (currentIndex > 0) {
+                const prevPhoto = filteredPhotos[currentIndex - 1]
+                if (!prevPhoto) return
+                setSelectedId(prevPhoto.id)
+              }
             }}
           />
         )}

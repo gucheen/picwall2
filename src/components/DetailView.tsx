@@ -1,5 +1,5 @@
-import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
+import { motion } from 'motion/react'
 import type { Photo } from '../../types/shared_types'
 import styles from './DetailView.module.css'
 
@@ -10,13 +10,12 @@ interface DetailViewProps {
   onPrev: () => void
 }
 
-const transitionSettings = {
-  type: 'spring' as const,
-  stiffness: 300,
-  damping: 30
-}
-
-export default function DetailView({ photo, onClose, onNext, onPrev }: DetailViewProps) {
+export default function DetailView({
+  photo,
+  onClose,
+  onNext,
+  onPrev,
+}: DetailViewProps) {
   /* New state for progressive loading */
   const [imgSrc, setImgSrc] = useState(photo.thumbnailSrc || photo.src)
   const [loadProgress, setLoadProgress] = useState<number | null>(null)
@@ -30,17 +29,6 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
   // Preload full image if we started with thumbnail
   useEffect(() => {
     if (photo.thumbnailSrc && imgSrc !== photo.src) {
-        // ... (omitted similar logic, but ensuring it runs on new photo)
-        // Since we reset imgSrc in the effect above, this effect logic needs to be robust.
-        // Simplified loader for this change:
-      const img = new Image()
-      img.src = photo.src
-      img.onload = () => {
-          setImgSrc(photo.src)
-          setLoadProgress(null)
-      }
-      // If we want progress we need xhr. Let's keep the XHR pattern but make sure it cleans up.
-      
       const xhr = new XMLHttpRequest()
       xhr.open('GET', photo.src, true)
       xhr.responseType = 'blob'
@@ -57,14 +45,16 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
         }
       }
       xhr.send()
+      setLoadProgress(0)
       return () => {
-          xhr.abort()
-          if (imgSrc.startsWith('blob:')) URL.revokeObjectURL(imgSrc)
+        xhr.abort()
+        setLoadProgress(null)
+        if (imgSrc.startsWith('blob:')) URL.revokeObjectURL(imgSrc)
       }
     }
-  }, [photo.src, photo.id]) // Depend on ID to re-run
+  }, [photo.src])
 
-  // ... (Lock body scroll effect same as before) ...
+  // Lock body scroll
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => {
@@ -73,7 +63,7 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
     }
   }, [])
 
-  // Keyboard navigation (Same as before)
+  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -85,16 +75,15 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
   }, [onClose, onNext, onPrev])
 
   return (
-    <div className={styles.fixedOverlay} onClick={onClose}>
+    <motion.div
+      className={styles.fixedOverlay}
+      onClick={onClose}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
       {/* Backdrop */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
-        onClick={onClose}
-        className={styles.backdrop}
-      />
+      <div className={styles.backdrop} onClick={onClose} />
 
       <div className={styles.container}>
         {/* Main Image Container */}
@@ -103,44 +92,65 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
             className={styles.imageWrapper}
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
-             {/* Nav Handlers Overlay */}
-            <button className={styles.navButtonLeft} onClick={(e) => { e.stopPropagation(); onPrev(); }}>
-                ‹
+            {/* Close Button Overlay */}
+            <button
+              className={styles.imageCloseButton}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose()
+              }}
+            >
+              ×
             </button>
-            <button className={styles.navButtonRight} onClick={(e) => { e.stopPropagation(); onNext(); }}>
-                ›
+            {/* Nav Handlers Overlay */}
+            <button
+              className={styles.navButtonLeft}
+              onClick={(e) => {
+                e.stopPropagation()
+                onPrev()
+              }}
+            >
+              ‹
             </button>
-            
+            <button
+              className={styles.navButtonRight}
+              onClick={(e) => {
+                e.stopPropagation()
+                onNext()
+              }}
+            >
+              ›
+            </button>
+
             {loadProgress !== null && (
               <div className={styles.progressOverlay}>
                 <div className={styles.progressText}>{loadProgress}%</div>
               </div>
             )}
-            
-            <motion.img
-              layoutId={`image-${photo.id}`}
+
+            <img
               src={imgSrc}
               alt={photo.name}
               className={styles.image}
               width={photo.width}
               height={photo.height}
-              transition={transitionSettings}
             />
           </div>
         </div>
 
-        {/* Metadata Sidebar (Lightroom Style) */}
+        {/* Metadata Sidebar */}
         <motion.div
+          className={styles.sidebar}
+          onClick={(e: React.MouseEvent) => e.stopPropagation()}
           initial={{ x: '100%' }}
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
           transition={{
             type: 'tween',
+            duration: 0.16,
             ease: 'easeOut',
-            duration: 0.3,
+            delay: 0.3,
           }}
-          className={styles.sidebar}
-          onClick={(e: React.MouseEvent) => e.stopPropagation()}
         >
           <div className={styles.sidebarContent}>
             <h2 className={styles.title}>Info</h2>
@@ -170,18 +180,22 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
                 value={photo.date ? photo.date : undefined}
               />
               <MetaGroup label="Filename" value={photo.name} />
-              
+
               {photo.tags && photo.tags.length > 0 && (
-                  <div className={styles.metaGroup}>
-                      <div className={styles.label}>Tags</div>
-                      <div className={styles.tagsWrapper}>
-                          {photo.tags.map(tag => (
-                              <a key={tag} href={`/?tag=${tag}`} className={styles.tagChip}>
-                                  {tag}
-                              </a>
-                          ))}
-                      </div>
+                <div className={styles.metaGroup}>
+                  <div className={styles.label}>Tags</div>
+                  <div className={styles.tagsWrapper}>
+                    {photo.tags.map((tag) => (
+                      <a
+                        key={tag}
+                        href={`/?tag=${tag}`}
+                        className={styles.tagChip}
+                      >
+                        {tag}
+                      </a>
+                    ))}
                   </div>
+                </div>
               )}
             </div>
           </div>
@@ -191,7 +205,7 @@ export default function DetailView({ photo, onClose, onNext, onPrev }: DetailVie
           </button>
         </motion.div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
