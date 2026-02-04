@@ -111,3 +111,67 @@
     object-fit: cover;
     border-radius: 4px;
 }
+
+.uploadWrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.dropZone {
+    border: 2px dashed #444;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    transition: all 0.2s;
+    background: rgba(255, 255, 255, 0.02);
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.dropZoneActive {
+    border-color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.progressContainer {
+    width: 100%;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: #ccc;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.progressBar {
+    width: 100%;
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progressFill {
+    height: 100%;
+    background: #fff;
+    transition: width 0.3s ease;
+}
+
+.uploadLabel {
+    cursor: pointer;
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background: #fff;
+    color: #000;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.uploadLabel:hover {
+    opacity: 0.9;
+}
