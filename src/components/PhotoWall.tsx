@@ -92,7 +92,7 @@ export default function PhotoWall() {
       {/* Header / Upload */}
       <header className={styles.header}>
         <div className={styles.headerContent}>
-          <h1 className={styles.title}>PicWall</h1>
+          <a href="/"><h1 className={styles.title}>PicWall</h1></a>
           <div
             style={{
               display: 'flex',
@@ -132,7 +132,13 @@ export default function PhotoWall() {
           ))}
       </main>
 
-      {photos.length === 0 && (
+      {loading && (
+        <div className={styles.loadingContainer}>
+          <div className={styles.spinner}></div>
+        </div>
+      )}
+
+      {!loading && photos.length === 0 && (
         <div className={styles.emptyState}>
           No photos yet. Upload one to get started.
         </div>
