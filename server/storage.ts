@@ -1,8 +1,8 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import path from 'node:path'
-import { mkdir, unlink, access, stat, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, unlink, access, readFile, writeFile } from 'node:fs/promises'
+import Database from 'better-sqlite3'
 import type { Photo } from '../types/shared_types.js'
-import { compareDesc } from 'date-fns'
 
 const dbPath = path.join(process.cwd(), 'data', 'photos_db.json')
 
@@ -28,11 +28,15 @@ export interface StorageAdapter {
 
 // --- Local Adapter ---
 class LocalAdapter implements StorageAdapter {
+    private db: Database.Database
     private uploadsDir = path.join(process.cwd(), 'files', 'uploads')
     private thumbnailsDir = path.join(process.cwd(), 'files', 'thumbnails')
 
     constructor() {
         this.ensureDirs()
+        const dbDir = path.join(process.cwd(), 'data')
+        this.db = new Database(path.join(dbDir, 'photos.db'))
+        this.init()
     }
 
     private async ensureDirs() {
@@ -44,21 +48,87 @@ class LocalAdapter implements StorageAdapter {
         }
     }
 
-    async list(): Promise<Photo[]> {
+    private init() {
+        // Create table
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS photos (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                src TEXT NOT NULL,
+                thumbnailSrc TEXT,
+                width INTEGER,
+                height INTEGER,
+                date TEXT,
+                exif TEXT, -- JSON string
+                tags TEXT, -- JSON string
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `)
+
+        // Migrate from JSON if empty
+        const count = this.db.prepare('SELECT COUNT(*) as count FROM photos').get() as { count: number }
+        if (count.count === 0) {
+            this.migrateFromJson()
+        }
+    }
+
+    private async migrateFromJson() {
         if (await fileExists(dbPath)) {
             try {
                 const content = await readFile(dbPath, 'utf-8')
-                return JSON.parse(content)
+                const photos: Photo[] = JSON.parse(content)
+                const insert = this.db.prepare(`
+                    INSERT INTO photos (id, name, src, thumbnailSrc, width, height, date, exif, tags)
+                    VALUES (@id, @name, @src, @thumbnailSrc, @width, @height, @date, @exif, @tags)
+                `)
+
+                const transaction = this.db.transaction((photos: Photo[]) => {
+                    for (const photo of photos) {
+                        insert.run({
+                            id: photo.id,
+                            name: photo.name,
+                            src: photo.src,
+                            thumbnailSrc: photo.thumbnailSrc,
+                            width: photo.width,
+                            height: photo.height,
+                            date: photo.date,
+                            exif: photo.exif ? JSON.stringify(photo.exif) : null,
+                            tags: photo.tags ? JSON.stringify(photo.tags) : null
+                        })
+                    }
+                })
+
+                transaction(photos)
+                console.log(`Migrated ${photos.length} photos from JSON to SQLite`)
             } catch (e) {
-                console.error("Local DB read error", e)
+                console.error("Migration failed", e)
             }
         }
-        return []
+    }
+
+    async list(): Promise<Photo[]> {
+        const rows = this.db.prepare('SELECT * FROM photos ORDER BY date DESC, created_at DESC').all() as any[]
+        return rows.map(this.mapRowToPhoto)
+    }
+
+    private mapRowToPhoto(row: any): Photo {
+        return {
+            id: row.id,
+            name: row.name,
+            src: row.src,
+            thumbnailSrc: row.thumbnailSrc,
+            width: row.width,
+            height: row.height,
+            date: row.date,
+            exif: row.exif ? JSON.parse(row.exif) : undefined,
+            tags: row.tags ? JSON.parse(row.tags) : undefined
+        }
     }
 
     async save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
         await this.ensureDirs()
-        
+
+        // Write files
         // Convert Blob to Buffer if needed
         let originalBuf: Buffer | Uint8Array
         if (original instanceof Blob) {
@@ -69,17 +139,28 @@ class LocalAdapter implements StorageAdapter {
             originalBuf = original
         }
 
-        // Ensure thumbnail is Buffer
         const thumbnailBuf = Buffer.isBuffer(thumbnail) ? thumbnail : Buffer.from(thumbnail)
 
         await writeFile(path.join(this.uploadsDir, filename), originalBuf)
         await writeFile(path.join(this.thumbnailsDir, `thumb_${filename}.avif`), thumbnailBuf)
 
-        // Update DB
-        let photos: Photo[] = await this.list()
-        photos.push(metadata)
-        photos.sort((a, b) => a.date && b.date ? compareDesc(a.date, b.date) : 0)
-        await writeFile(dbPath, JSON.stringify(photos, null, 2))
+        // Insert DB
+        const stmt = this.db.prepare(`
+            INSERT INTO photos (id, name, src, thumbnailSrc, width, height, date, exif, tags)
+            VALUES (@id, @name, @src, @thumbnailSrc, @width, @height, @date, @exif, @tags)
+        `)
+
+        stmt.run({
+            id: metadata.id,
+            name: metadata.name,
+            src: metadata.src,
+            thumbnailSrc: metadata.thumbnailSrc,
+            width: metadata.width,
+            height: metadata.height,
+            date: metadata.date,
+            exif: metadata.exif ? JSON.stringify(metadata.exif) : null,
+            tags: metadata.tags ? JSON.stringify(metadata.tags) : null
+        })
     }
 
     async delete(id: string): Promise<boolean> {
@@ -90,14 +171,10 @@ class LocalAdapter implements StorageAdapter {
             if (await fileExists(original)) await unlink(original)
             if (await fileExists(thumb)) await unlink(thumb)
 
-            // Update DB
-            let photos = await this.list()
-            photos = photos.filter(p => p.id !== id)
-            await writeFile(dbPath, JSON.stringify(photos, null, 2))
-            
-            return true
+            const info = this.db.prepare('DELETE FROM photos WHERE id = ?').run(id)
+            return info.changes > 0
         } catch (e) {
-            console.error("Local delete failed", e)
+            console.error("Delete failed", e)
             return false
         }
     }
@@ -116,35 +193,36 @@ class LocalAdapter implements StorageAdapter {
     }
 
     async updateMany(updates: { id: string, partial: Partial<Photo> }[]): Promise<void> {
-        if (await fileExists(dbPath)) {
-            try {
-                let photos: Photo[] = JSON.parse(await readFile(dbPath, 'utf-8'))
-                let hasChanges = false
+        const transaction = this.db.transaction((updates) => {
+            for (const { id, partial } of updates) {
+                // Dynamically build update query
+                const keys = Object.keys(partial)
+                if (keys.length === 0) continue
 
-                updates.forEach(({ id, partial }) => {
-                    const index = photos.findIndex(p => p.id === id)
-                    if (index !== -1) {
-                        photos[index] = { ...photos[index], ...partial } as Photo
-                        hasChanges = true
+                const setClause = keys.map(k => `${k} = @${k}`).join(', ')
+                const stmt = this.db.prepare(`UPDATE photos SET ${setClause} WHERE id = @id`)
+                
+                const params: any = { id }
+                for (const k of keys) {
+                    const val = (partial as any)[k]
+                    if (k === 'exif' || k === 'tags') {
+                        params[k] = val ? JSON.stringify(val) : null
+                    } else {
+                        params[k] = val
                     }
-                })
-
-                if (hasChanges) {
-                    await writeFile(dbPath, JSON.stringify(photos, null, 2))
                 }
-            } catch (e) {
-                console.error("Local DB update error", e)
+                stmt.run(params)
             }
-        }
+        })
+        transaction(updates)
     }
 }
-
-// --- S3 Adapter ---
 class S3Adapter implements StorageAdapter {
     private client: S3Client
     private bucket: string
     private endpoint: string
     private cdnUrl: string
+    private db: Database.Database
 
     constructor() {
         this.client = new S3Client({
@@ -158,28 +236,98 @@ class S3Adapter implements StorageAdapter {
         this.bucket = process.env.S3_BUCKET!
         this.endpoint = process.env.S3_ENDPOINT!
         this.cdnUrl = process.env.S3_CDN_URL ?? ''
+
+        // Initialize SQLite DB (shared with local adapter logic for consistency)
+        const dbDir = path.join(process.cwd(), 'data')
+        this.db = new Database(path.join(dbDir, 'photos.db'))
+        this.init()
     }
 
-    async list(): Promise<Photo[]> {
-        // Use local DB even for S3
+    private init() {
+        // Create table
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS photos (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                src TEXT NOT NULL,
+                thumbnailSrc TEXT,
+                width INTEGER,
+                height INTEGER,
+                date TEXT,
+                exif TEXT, -- JSON string
+                tags TEXT, -- JSON string
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `)
+
+        // Migrate from JSON if empty
+        const count = this.db.prepare('SELECT COUNT(*) as count FROM photos').get() as { count: number }
+        if (count.count === 0) {
+            this.migrateFromJson()
+        }
+    }
+
+    private async migrateFromJson() {
         if (await fileExists(dbPath)) {
             try {
                 const content = await readFile(dbPath, 'utf-8')
-                const data = JSON.parse(content)
-                return data.map((item: Photo) => {
-                    if (this.cdnUrl) {
-                        const base = this.cdnUrl!;
-                         return {
-                            ...item,
-                            thumbnailSrc: item.thumbnailSrc ? new URL(item.thumbnailSrc, base).toString() : undefined,
-                            src: new URL(item.src, base).toString(),
-                        }
+                const photos: Photo[] = JSON.parse(content)
+                const insert = this.db.prepare(`
+                    INSERT INTO photos (id, name, src, thumbnailSrc, width, height, date, exif, tags)
+                    VALUES (@id, @name, @src, @thumbnailSrc, @width, @height, @date, @exif, @tags)
+                `)
+
+                const transaction = this.db.transaction((photos: Photo[]) => {
+                    for (const photo of photos) {
+                        insert.run({
+                            id: photo.id,
+                            name: photo.name,
+                            src: photo.src,
+                            thumbnailSrc: photo.thumbnailSrc,
+                            width: photo.width,
+                            height: photo.height,
+                            date: photo.date,
+                            exif: photo.exif ? JSON.stringify(photo.exif) : null,
+                            tags: photo.tags ? JSON.stringify(photo.tags) : null
+                        })
                     }
-                    return item
                 })
-            } catch (e) { console.error("Local DB read error (S3 mode)", e) }
+
+                transaction(photos)
+                console.log(`Migrated ${photos.length} photos from JSON to SQLite (S3 Mode)`)
+            } catch (e) {
+                console.error("Migration failed", e)
+            }
         }
-        return []
+    }
+
+    async list(): Promise<Photo[]> {
+        const rows = this.db.prepare('SELECT * FROM photos ORDER BY date DESC, created_at DESC').all() as any[]
+        const photos = rows.map(this.mapRowToPhoto)
+
+        if (this.cdnUrl) {
+            const base = this.cdnUrl!;
+            return photos.map(item => ({
+                ...item,
+                thumbnailSrc: item.thumbnailSrc ? new URL(item.thumbnailSrc, base).toString() : undefined,
+                src: new URL(item.src, base).toString(),
+            }))
+        }
+        return photos
+    }
+
+    private mapRowToPhoto(row: any): Photo {
+        return {
+            id: row.id,
+            name: row.name,
+            src: row.src,
+            thumbnailSrc: row.thumbnailSrc,
+            width: row.width,
+            height: row.height,
+            date: row.date,
+            exif: row.exif ? JSON.parse(row.exif) : undefined,
+            tags: row.tags ? JSON.parse(row.tags) : undefined
+        }
     }
 
     async save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void> {
@@ -207,14 +355,23 @@ class S3Adapter implements StorageAdapter {
             ContentType: 'image/avif'
         }))
 
-        // Update Local DB
-        let photos: Photo[] = []
-        if (await fileExists(dbPath)) {
-            try { photos = JSON.parse(await readFile(dbPath, 'utf-8')) } catch { }
-        }
-        photos.push(metadata)
-        photos.sort((a, b) => a.date && b.date ? compareDesc(a.date, b.date) : 0)
-        await writeFile(dbPath, JSON.stringify(photos, null, 2))
+        // Insert DB
+        const stmt = this.db.prepare(`
+            INSERT INTO photos (id, name, src, thumbnailSrc, width, height, date, exif, tags)
+            VALUES (@id, @name, @src, @thumbnailSrc, @width, @height, @date, @exif, @tags)
+        `)
+
+        stmt.run({
+            id: metadata.id,
+            name: metadata.name,
+            src: metadata.src,
+            thumbnailSrc: metadata.thumbnailSrc,
+            width: metadata.width,
+            height: metadata.height,
+            date: metadata.date,
+            exif: metadata.exif ? JSON.stringify(metadata.exif) : null,
+            tags: metadata.tags ? JSON.stringify(metadata.tags) : null
+        })
     }
 
     async delete(id: string): Promise<boolean> {
@@ -228,13 +385,8 @@ class S3Adapter implements StorageAdapter {
                 Key: `thumbnails/thumb_${id}.avif`
             }))
 
-            // Update Local DB
-            if (await fileExists(dbPath)) {
-                let photos = JSON.parse(await readFile(dbPath, 'utf-8')) as Photo[]
-                photos = photos.filter(p => p.id !== id)
-                await writeFile(dbPath, JSON.stringify(photos, null, 2))
-            }
-            return true
+            const info = this.db.prepare('DELETE FROM photos WHERE id = ?').run(id)
+            return info.changes > 0
         } catch (e) {
             console.error("S3 delete error", e)
             return false
@@ -260,26 +412,28 @@ class S3Adapter implements StorageAdapter {
     }
 
     async updateMany(updates: { id: string, partial: Partial<Photo> }[]): Promise<void> {
-        if (await fileExists(dbPath)) {
-            try {
-                let photos: Photo[] = JSON.parse(await readFile(dbPath, 'utf-8'))
-                let hasChanges = false
+        const transaction = this.db.transaction((updates) => {
+            for (const { id, partial } of updates) {
+                // Dynamically build update query
+                const keys = Object.keys(partial)
+                if (keys.length === 0) continue
 
-                updates.forEach(({ id, partial }) => {
-                    const index = photos.findIndex(p => p.id === id)
-                    if (index !== -1) {
-                        photos[index] = { ...photos[index], ...partial } as Photo
-                        hasChanges = true
+                const setClause = keys.map(k => `${k} = @${k}`).join(', ')
+                const stmt = this.db.prepare(`UPDATE photos SET ${setClause} WHERE id = @id`)
+                
+                const params: any = { id }
+                for (const k of keys) {
+                    const val = (partial as any)[k]
+                    if (k === 'exif' || k === 'tags') {
+                        params[k] = val ? JSON.stringify(val) : null
+                    } else {
+                        params[k] = val
                     }
-                })
-
-                if (hasChanges) {
-                    await writeFile(dbPath, JSON.stringify(photos, null, 2))
                 }
-            } catch (e) {
-                console.error("S3 DB update error", e)
+                stmt.run(params)
             }
-        }
+        })
+        transaction(updates)
     }
 }
 

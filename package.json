@@ -12,12 +12,14 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.744.0",
     "@hono/node-server": "^1.13.8",
+    "better-sqlite3": "^12.6.2",
     "date-fns": "^4.1.0",
     "exifreader": "^4.36.1",
     "hono": "^4.11.7",
     "sharp": "^0.33.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.19.30",
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",
