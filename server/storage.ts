@@ -21,6 +21,9 @@ export interface StorageAdapter {
     save(filename: string, original: ArrayBuffer | Buffer | Blob, thumbnail: ArrayBuffer | Buffer, metadata: Photo): Promise<void>
     delete(id: string): Promise<boolean>
     get(filename: string, type: 'uploads' | 'thumbnails'): Promise<Buffer | ReadableStream | null> // Return compatible with Response body
+    get(filename: string, type: 'uploads' | 'thumbnails'): Promise<Buffer | ReadableStream | null> // Return compatible with Response body
+    update(id: string, partial: Partial<Photo>): Promise<void>
+    updateMany(updates: { id: string, partial: Partial<Photo> }[]): Promise<void>
 }
 
 // --- Local Adapter ---
@@ -106,6 +109,33 @@ class LocalAdapter implements StorageAdapter {
             return await readFile(filePath)
         }
         return null
+    }
+
+    async update(id: string, partial: Partial<Photo>): Promise<void> {
+        return this.updateMany([{ id, partial }])
+    }
+
+    async updateMany(updates: { id: string, partial: Partial<Photo> }[]): Promise<void> {
+        if (await fileExists(dbPath)) {
+            try {
+                let photos: Photo[] = JSON.parse(await readFile(dbPath, 'utf-8'))
+                let hasChanges = false
+
+                updates.forEach(({ id, partial }) => {
+                    const index = photos.findIndex(p => p.id === id)
+                    if (index !== -1) {
+                        photos[index] = { ...photos[index], ...partial } as Photo
+                        hasChanges = true
+                    }
+                })
+
+                if (hasChanges) {
+                    await writeFile(dbPath, JSON.stringify(photos, null, 2))
+                }
+            } catch (e) {
+                console.error("Local DB update error", e)
+            }
+        }
     }
 }
 
@@ -223,6 +253,33 @@ class S3Adapter implements StorageAdapter {
          } catch (e) {
              return null
          }
+    }
+
+    async update(id: string, partial: Partial<Photo>): Promise<void> {
+        return this.updateMany([{ id, partial }])
+    }
+
+    async updateMany(updates: { id: string, partial: Partial<Photo> }[]): Promise<void> {
+        if (await fileExists(dbPath)) {
+            try {
+                let photos: Photo[] = JSON.parse(await readFile(dbPath, 'utf-8'))
+                let hasChanges = false
+
+                updates.forEach(({ id, partial }) => {
+                    const index = photos.findIndex(p => p.id === id)
+                    if (index !== -1) {
+                        photos[index] = { ...photos[index], ...partial } as Photo
+                        hasChanges = true
+                    }
+                })
+
+                if (hasChanges) {
+                    await writeFile(dbPath, JSON.stringify(photos, null, 2))
+                }
+            } catch (e) {
+                console.error("S3 DB update error", e)
+            }
+        }
     }
 }
 

@@ -116,3 +116,11 @@ export async function savePhoto(file: File): Promise<string> {
 export async function deletePhoto(id: string): Promise<boolean> {
   return await storage.delete(id)
 }
+
+export async function updatePhoto(id: string, updates: Partial<Photo>): Promise<void> {
+  return await storage.update(id, updates)
+}
+
+export async function updatePhotos(updates: { id: string, partial: Partial<Photo> }[]): Promise<void> {
+  return await storage.updateMany(updates)
+}

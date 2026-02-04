@@ -15,6 +15,7 @@ export default function PhotoCard({ photo, onClick }: PhotoCardProps) {
 
   return (
     <div
+      id={`photo-card-${photo.id}`}
       className={`${styles.card} group`} /* Added group manually for legacy support or just in case, though modules handle hover via selector */
       onClick={() => onClick(photo)}
       style={{ aspectRatio }}

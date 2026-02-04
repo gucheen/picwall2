@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { Hono } from 'hono'
 import { csrf } from 'hono/csrf'
 import { secureHeaders } from 'hono/secure-headers'
-import { getPhotos, savePhoto, deletePhoto } from './photos.js'
+import { getPhotos, savePhoto, deletePhoto, updatePhoto, updatePhotos } from './photos.js'
 import * as auth from './auth.js'
 import { storage } from './storage.js'
 
@@ -67,6 +67,38 @@ app.delete('/api/photos/:id', auth.requireAuth, async (c) => {
   } else {
     return c.json({ error: 'Failed to delete photo' }, 500)
   }
+})
+
+app.patch('/api/photos/:id', auth.requireAuth, async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json<{ tags: string[] }>()
+
+  if (!body.tags || !Array.isArray(body.tags)) {
+    return c.json({ error: 'Invalid tags' }, 400)
+  }
+
+  await getPhotos() // Ensure DB is loaded? updatePhoto handles it.
+  // Actually updatePhoto just calls storage.update which reads DB.
+  
+  // We might want to validate the photo exists first? storage.update checks index.
+  // If index -1, it does nothing.
+  
+  await updatePhoto(id, { tags: body.tags })
+  return c.json({ success: true })
+})
+
+app.patch('/api/photos', auth.requireAuth, async (c) => {
+  const body = await c.req.json<{ ids: string[], tags: string[] }>()
+
+  if (!body.ids || !Array.isArray(body.ids) || !body.tags || !Array.isArray(body.tags)) {
+    return c.json({ error: 'Invalid request' }, 400)
+  }
+
+  // Optimize? We could update DB once, but storage.update reads/writes every time.
+  // For now, parallelize updates.
+  await updatePhotos(body.ids.map(id => ({ id, partial: { tags: body.tags } })))
+  
+  return c.json({ success: true })
 })
 
 // Serve Static Files (Uploads & Thumbnails)

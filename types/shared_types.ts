@@ -18,4 +18,5 @@ export interface Photo {
   exif?: PhotoExif
   date?: string
   thumbnailSrc?: string
+  tags?: string[]
 }

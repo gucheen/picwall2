@@ -153,3 +153,65 @@
   color: #fff;
   border-color: #fff;
 }
+
+.tagsWrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tagChip {
+  display: inline-flex;
+  padding: 0.25rem 0.5rem;
+  background-color: #333;
+  color: #dedede;
+  font-size: 0.75rem;
+  border-radius: 9999px;
+  text-decoration: none;
+  transition: background-color 0.2s;
+}
+
+.tagChip:hover {
+  background-color: #444;
+  color: white;
+}
+
+.navButtonLeft,
+.navButtonRight {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    border: none;
+    font-size: 2rem;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+    user-select: none;
+    z-index: 10;
+}
+
+.imageWrapper:hover .navButtonLeft,
+.imageWrapper:hover .navButtonRight {
+    opacity: 1;
+}
+
+.navButtonLeft:hover,
+.navButtonRight:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.navButtonLeft {
+    left: 20px;
+}
+
+.navButtonRight {
+    right: 20px;
+}

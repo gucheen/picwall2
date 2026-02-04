@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
+import { flushSync } from 'react-dom'
 import type { Photo } from '../../types/shared_types'
 import PhotoCard from './PhotoCard'
 import DetailView from './DetailView'
@@ -54,26 +55,40 @@ export default function PhotoWall() {
   }, [])
 
   // Distribute photos into columns (Left-to-Right, then Top-to-Bottom order)
+  const [tag, setTag] = useState<string | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('tag')) {
+      setTag(params.get('tag'))
+    }
+  }, [])
+
+  const filteredPhotos = tag 
+    ? photos.filter(p => p.tags && p.tags.includes(tag))
+    : photos
+
   const columns = Array.from({ length: numColumns }, () => [] as Photo[])
-  photos.forEach((photo, index) => {
+  filteredPhotos.forEach((photo, index) => {
     columns[index % numColumns]!.push(photo)
   })
 
-  if (loading)
-    return (
-      <div
-        style={{
-          color: '#fff',
-          textAlign: 'center',
-          marginTop: '20vh',
-        }}
-      >
-        Loading...
-      </div>
-    )
+  /* Removed direction state */
+
+  // Scroll current photo into view when selected changes
+  useEffect(() => {
+    if (selectedId) {
+        const el = document.getElementById(`photo-card-${selectedId}`)
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }
+    }
+  }, [selectedId])
 
   return (
     <div className={styles.container}>
+      {/* ... header and grid ... */}
+      
       {/* Header / Upload */}
       <header className={styles.header}>
         <div className={styles.headerContent}>
@@ -127,9 +142,22 @@ export default function PhotoWall() {
       <AnimatePresence>
         {selectedId && selectedPhoto && (
           <DetailView
-            key={selectedId}
             photo={selectedPhoto}
             onClose={() => setSelectedId(null)}
+            onNext={() => {
+                const currentIndex = filteredPhotos.findIndex(p => p.id === selectedId)
+                if (currentIndex < filteredPhotos.length - 1) {
+                    const nextPhoto = filteredPhotos[currentIndex + 1]
+                    if (nextPhoto) setSelectedId(nextPhoto.id)
+                }
+            }}
+            onPrev={() => {
+                const currentIndex = filteredPhotos.findIndex(p => p.id === selectedId)
+                if (currentIndex > 0) {
+                    const prevPhoto = filteredPhotos[currentIndex - 1]
+                    if (prevPhoto) setSelectedId(prevPhoto.id)
+                }
+            }}
           />
         )}
       </AnimatePresence>
