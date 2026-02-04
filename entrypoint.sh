@@ -11,7 +11,7 @@ usermod -u $USER_ID node
 groupmod -g $USER_ID node
 
 # 确保工作目录归该用户所有
-chown -R node:node /usr/src/app
+# chown -R node:node /usr/src/app
 
 # 使用 su-exec 切换到 node 并执行后续命令（即 CMD）
 exec /sbin/su-exec node "$@"
