@@ -1,5 +1,5 @@
-import { motion, AnimatePresence } from 'framer-motion'
-import { useEffect, useState, useRef } from 'react'
+import { motion } from 'framer-motion'
+import { useEffect, useState } from 'react'
 import type { Photo } from '../../types/shared_types'
 import styles from './DetailView.module.css'
 

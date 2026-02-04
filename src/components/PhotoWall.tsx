@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { flushSync } from 'react-dom'
 import type { Photo } from '../../types/shared_types'
 import PhotoCard from './PhotoCard'
 import DetailView from './DetailView'
@@ -68,9 +67,25 @@ export default function PhotoWall() {
     ? photos.filter(p => p.tags && p.tags.includes(tag))
     : photos
 
+  /* Shortest-column-first distribution */
   const columns = Array.from({ length: numColumns }, () => [] as Photo[])
-  filteredPhotos.forEach((photo, index) => {
-    columns[index % numColumns]!.push(photo)
+  const columnHeights = new Array(numColumns).fill(0)
+
+  filteredPhotos.forEach((photo) => {
+    // Find column with minimum height
+    const minHeight = Math.min(...columnHeights)
+    const colIndex = columnHeights.indexOf(minHeight)
+
+    columns[colIndex]!.push(photo)
+
+    // Estimate height. Default assumption 1.0 aspect ratio if missing
+    // We only care about relative height, so we divide height by width (inverse of aspect ratio)
+    // or just 1 if undefined.
+    const aspectRatio = (photo.width && photo.height) 
+      ? (photo.height / photo.width) 
+      : 1
+      
+    columnHeights[colIndex] += aspectRatio
   })
 
   /* Removed direction state */
