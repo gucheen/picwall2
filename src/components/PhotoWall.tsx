@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { AnimatePresence } from 'motion/react'
 import type { Photo } from '../../types/shared_types'
 import PhotoCard from './PhotoCard'
@@ -68,6 +68,34 @@ export default function PhotoWall() {
     ? photos.filter((p) => p.tags && p.tags.includes(tag))
     : photos
 
+  // Compute sorted tags
+  const sortedTags = useMemo(() => {
+    const tagLatestDates = new Map<string, number>()
+
+    photos.forEach((photo) => {
+      if (photo.tags && photo.tags.length > 0) {
+        // photo.date format is typically 'yyyy-MM-dd HH:mm:ss' or missing
+        // Replace dashes with slashes to ensure Safari can parse the date correctly
+        const photoTime = photo.date
+          ? new Date(photo.date.replace(/-/g, '/')).getTime() ||
+            new Date(photo.date).getTime()
+          : 0
+
+        photo.tags.forEach((t) => {
+          const currentMax = tagLatestDates.get(t) || 0
+          if (photoTime > currentMax) {
+            tagLatestDates.set(t, photoTime)
+          }
+        })
+      }
+    })
+
+    // Sort by latest date descending
+    return Array.from(tagLatestDates.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map((entry) => entry[0])
+  }, [photos])
+
   /* Shortest-column-first distribution */
   const columns = Array.from({ length: numColumns }, () => [] as Photo[])
   const columnHeights = new Array(numColumns).fill(0)
@@ -79,7 +107,7 @@ export default function PhotoWall() {
 
     columns[colIndex]!.push(photo)
 
-    // Estimate height. Default assumption 1.0 aspect ratio if missing
+    // Estimate height. Default assumption 1.0
     // We only care about relative height, so we divide height by width (inverse of aspect ratio)
     // or just 1 if undefined.
     const aspectRatio =
@@ -115,6 +143,47 @@ export default function PhotoWall() {
               display: 'flex',
               alignItems: 'center',
               gap: '1rem',
+              flex: 1,
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {sortedTags.length > 0 && (
+              <div className={styles.headerTags}>
+                <button
+                  className={`${styles.tagLink} ${!tag ? styles.tagLinkActive : ''}`}
+                  onClick={() => {
+                    setTag(null)
+                    window.history.pushState({}, '', '/')
+                  }}
+                >
+                  All
+                </button>
+                {sortedTags.map((t) => (
+                  <button
+                    key={t}
+                    className={`${styles.tagLink} ${tag === t ? styles.tagLinkActive : ''}`}
+                    onClick={() => {
+                      setTag(t)
+                      window.history.pushState(
+                        {},
+                        '',
+                        `/?tag=${encodeURIComponent(t)}`,
+                      )
+                    }}
+                  >
+                    #{t}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
             }}
           >
             {user ? (
@@ -132,26 +201,6 @@ export default function PhotoWall() {
           </div>
         </div>
       </header>
-
-      {/* Tag Filter Status */}
-      {tag && (
-        <div className={styles.filterBar}>
-          <span>
-            Filtering by: <strong>#{tag}</strong>
-          </span>
-          <a
-            href="/"
-            className={styles.clearFilter}
-            onClick={(e) => {
-              e.preventDefault()
-              setTag(null)
-              window.history.pushState({}, '', '/')
-            }}
-          >
-            Clear
-          </a>
-        </div>
-      )}
 
       {/* Grid */}
       <main className={styles.masonryGrid}>

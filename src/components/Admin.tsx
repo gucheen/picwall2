@@ -57,6 +57,7 @@ export default function Admin() {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
+      if (!file) continue
       const formData = new FormData()
       formData.append('file', file)
 
@@ -151,8 +152,9 @@ export default function Admin() {
         const end = Math.max(lastIndex, currentIndex)
 
         for (let i = start; i <= end; i++) {
-          if (photos[i]) {
-            newSelected.add(photos[i].id)
+          const p = photos[i]
+          if (p) {
+            newSelected.add(p.id)
           }
         }
       }

@@ -166,3 +166,48 @@
 .clearFilter:hover {
   color: #fff;
 }
+
+.headerTags {
+  display: flex;
+  gap: 1.5rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 0 1rem;
+}
+
+.headerTags::-webkit-scrollbar {
+  display: none;
+}
+
+.tagLink {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s, transform 0.2s;
+  padding: 0;
+}
+
+.tagLink:hover {
+  color: #fff;
+}
+
+.tagLinkActive {
+  color: #fff;
+  font-weight: 500;
+  position: relative;
+}
+
+.tagLinkActive::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: #fff;
+}
