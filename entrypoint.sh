@@ -1,17 +1,18 @@
 #!/bin/sh
+set -eu
 
-# 获取通过 docker-compose user: 指定的 UID/GID
-# 如果没有指定，默认使用 1000
-USER_ID=${LOCAL_USER_ID:-1000}
+if [ "$(id -u)" = "0" ]; then
+    USER_ID=${LOCAL_USER_ID:-1000}
+    GROUP_ID=${LOCAL_GROUP_ID:-$USER_ID}
+    if [ "$(id -g bun)" != "$GROUP_ID" ]; then
+        groupmod -o -g "$GROUP_ID" bun
+    fi
+    if [ "$(id -u bun)" != "$USER_ID" ]; then
+        usermod -o -u "$USER_ID" bun
+    fi
+    mkdir -p data files
+    chown bun:bun data files
+    exec /sbin/su-exec bun "$@"
+fi
 
-echo "Starting with UID : $USER_ID"
-
-# 动态修改内部用户的 UID
-usermod -u $USER_ID node
-groupmod -g $USER_ID node
-
-# 确保工作目录归该用户所有
-# chown -R node:node /usr/src/app
-
-# 使用 su-exec 切换到 node 并执行后续命令（即 CMD）
-exec /sbin/su-exec node "$@"
+exec "$@"

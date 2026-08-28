@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
 import type { Photo } from '../../types/shared_types'
+import { loadOriginalImage } from '../lib/image-loader'
+import { detailSource, photoSrcSet } from '../lib/photo-sources'
 import styles from './DetailView.module.css'
 
 interface DetailViewProps {
@@ -16,50 +18,28 @@ export default function DetailView({
   onNext,
   onPrev,
 }: DetailViewProps) {
-  /* New state for progressive loading */
-  const [imgSrc, setImgSrc] = useState(photo.thumbnailSrc || photo.src)
+  const [imgSrc, setImgSrc] = useState(detailSource(photo))
+  const [originalId, setOriginalId] = useState<string | null>(null)
   const [loadProgress, setLoadProgress] = useState<number | null>(null)
 
-  // Reset img src when photo changes
   useEffect(() => {
-    setImgSrc(photo.thumbnailSrc || photo.src)
+    setImgSrc(detailSource(photo))
+    setOriginalId(null)
     setLoadProgress(null)
-  }, [photo.id])
+  }, [photo.id, photo.src, photo.thumbnailSrc, photo.previewSrc])
 
-  // Preload full image if we started with thumbnail
   useEffect(() => {
-    if (photo.thumbnailSrc && imgSrc !== photo.src) {
-      const xhr = new XMLHttpRequest()
-      xhr.open('GET', photo.src, true)
-      xhr.responseType = 'blob'
-      xhr.onprogress = (event) => {
-        if (event.lengthComputable) {
-          setLoadProgress(Math.round((event.loaded / event.total) * 100))
-        }
-      }
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          const blobUrl = URL.createObjectURL(xhr.response)
-          setImgSrc(blobUrl)
-          setLoadProgress(null)
-        }
-      }
-      xhr.send()
-      setLoadProgress(0)
-      return () => {
-        xhr.abort()
-        setLoadProgress(null)
-        if (imgSrc.startsWith('blob:')) URL.revokeObjectURL(imgSrc)
-      }
+    if (originalId === photo.id && imgSrc !== photo.src) {
+      return loadOriginalImage(photo.src, setImgSrc, setLoadProgress)
     }
-  }, [photo.src])
+  }, [originalId, photo.id, photo.src])
 
   // Lock body scroll
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      if (imgSrc.startsWith('blob:')) URL.revokeObjectURL(imgSrc)
-      document.body.style.overflow = 'auto'
+      document.body.style.overflow = previousOverflow
     }
   }, [])
 
@@ -130,6 +110,9 @@ export default function DetailView({
 
             <img
               src={imgSrc}
+              srcSet={originalId === photo.id ? undefined : photoSrcSet(photo)}
+              sizes="(min-width: 768px) calc(100vw - 384px), calc(100vw - 32px)"
+              decoding="async"
               alt={photo.name}
               className={styles.image}
               width={photo.width}
@@ -188,7 +171,7 @@ export default function DetailView({
                     {photo.tags.map((tag) => (
                       <a
                         key={tag}
-                        href={`/?tag=${tag}`}
+                        href={`/?tag=${encodeURIComponent(tag)}`}
                         className={styles.tagChip}
                       >
                         {tag}
@@ -200,6 +183,12 @@ export default function DetailView({
             </div>
           </div>
 
+          {detailSource(photo) !== photo.src && originalId !== photo.id && (
+            <button className={styles.closeButton} onClick={() => setOriginalId(photo.id)}>
+              Load original
+            </button>
+          )}
+          <a className={styles.closeButton} href={photo.src} target="_blank" rel="noreferrer">Open original</a>
           <button onClick={onClose} className={styles.closeButton}>
             Close View
           </button>

@@ -2,6 +2,8 @@ import React from 'react'
 import { Route, Switch } from 'wouter'
 import PhotoWall from './components/PhotoWall'
 import Admin from './components/Admin'
+import Login from './components/Login'
+import Security from './components/Security'
 import { MotionConfig } from 'motion/react'
 
 function App() {
@@ -16,6 +18,8 @@ function App() {
         <Route path="/admin">
           <Admin />
         </Route>
+        <Route path="/login"><Login /></Route>
+        <Route path="/admin/security"><Security /></Route>
         <Route>404 Not Found</Route>
       </Switch>
     </>

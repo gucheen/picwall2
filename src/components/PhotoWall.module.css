@@ -83,32 +83,20 @@
 }
 
 .masonryGrid {
-  max-width: 1600px;
+  position: relative;
+  width: calc(100% - 2rem);
+  max-width: 1568px;
   margin: 2rem auto 0;
-  padding: 0 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
 }
 
-.gridColumn {
+.pageControls {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  /* Prevents overflow */
+  align-items: center;
   gap: 1rem;
-  /* Vertical gap between items */
+  padding: 2rem;
+  color: #aaa;
 }
-
-/* 
-   Breakpoints handled in JS now, but we keep container 
-   max-width adjustments if needed. 
-   Currently JS matches: 
-   640px -> 2 cols
-   1024px -> 3 cols
-   1280px -> 4 cols
-*/
 
 .emptyState {
   text-align: center;
@@ -168,6 +156,9 @@
 }
 
 .headerTags {
+  flex: 1;
+  min-width: 0;
+  margin: 0 1rem;
   display: flex;
   gap: 1.5rem;
   overflow-x: auto;

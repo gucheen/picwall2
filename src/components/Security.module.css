@@ -1,0 +1,20 @@
+.page { max-width: 640px; margin: 0 auto; padding: 3rem 1.25rem; color: #f4f4f4; }
+.back { display: inline-block; color: #bbb; text-decoration: none; margin-bottom: 2rem; }
+.card { padding: 2rem; border: 1px solid #333; border-radius: 16px; background: #141414; }
+.eyebrow { letter-spacing: .16em; font-size: .7rem; color: #999; margin: 0 0 1rem; }
+.card h1 { margin: 0 0 1rem; font-size: 2rem; }
+.card p { line-height: 1.6; overflow-wrap: anywhere; }
+.form { display: grid; gap: 1.25rem; margin: 1.75rem 0; }
+.form label { display: grid; gap: .6rem; font-size: .9rem; }
+.form input { width: 100%; box-sizing: border-box; color: #fff; background: #202020; border: 1px solid #555; border-radius: 6px; padding: .85rem; font: inherit; }
+.card button { border: 0; border-radius: 6px; padding: .85rem 1rem; color: #111; background: #eee; cursor: pointer; font: inherit; font-size: .9rem; }
+.card button:disabled { opacity: .45; cursor: not-allowed; }
+.card .secondary { border: 1px solid #555; background: transparent; color: #ddd; }
+.card :is(button, input, a):focus-visible { outline: 2px solid #a9c7ff; outline-offset: 3px; }
+.hint { color: #a5a5a5; font-size: .85rem; }
+.error, .error a { color: #ffb8b8; }
+.keys { list-style: none; padding: 0; margin: 1.75rem 0; }
+.keys li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #333; }
+.keys li div { min-width: 0; overflow-wrap: anywhere; }
+.keys span { display: block; font-size: .75rem; color: #aaa; margin-top: .4rem; }
+@media (max-width: 480px) { .card { padding: 1.25rem; } .keys li { align-items: flex-start; flex-direction: column; } }

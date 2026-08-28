@@ -1,126 +1,58 @@
-import sharp from 'sharp'
+import type { Photo, PhotoPage } from '../types/shared_types'
+import type { PageOptions } from './pagination'
+import { storage, photoDatabase } from './storage'
+import { InvalidImageError } from './image'
+import { PhotoListCache } from './photo-cache'
+import { TaskQueue } from './task-queue'
+import { imageConcurrency, imageQueueSize } from './image-settings'
 
-// Disable sharp cache to prevent memory leak
-sharp.cache(false)
-import ExifReader from 'exifreader'
-import type { Photo, PhotoExif } from '../types/shared_types.js'
-import { parse, format } from 'date-fns'
-import { storage } from './storage.js'
+const photoList = new PhotoListCache(async () => photoDatabase.list(), () => photoDatabase.version())
+const tags = new PhotoListCache(async () => photoDatabase.tags(), () => photoDatabase.version())
+const pages = new Map<string, PhotoListCache<PhotoPage>>()
+let pagesVersion = ''
+const imageQueue = new TaskQueue(imageConcurrency, imageQueueSize)
 
-async function generateThumbnailBuffer(originalBuffer: ArrayBuffer | Buffer): Promise<Buffer | ArrayBuffer> {
-  try {
-    return await sharp(originalBuffer)
-      .rotate() // Auto-rotate based on EXIF
-      .resize(600, null, { withoutEnlargement: true })
-      .avif({ quality: 75 })
-      .toBuffer()
-  } catch (err) {
-    console.error(`Failed to generate thumbnail`, err)
-    // Fallback? If sharp fails, we might just return the original if small enough? 
-    // Or throw. Let's return original buffer if resizing fails, hoping it's displayable.
-    return originalBuffer
-  }
+export function getPhotosResponse(ifNoneMatch?: string): Promise<Response> {
+  return photoList.response(ifNoneMatch)
 }
 
-async function getImageInfo(
-  fileBuffer: ArrayBuffer | Buffer,
-): Promise<{ exif: PhotoExif; width?: number; height?: number } | undefined> {
-  try {
-    const tags = ExifReader.load(fileBuffer)
+export function getTagsResponse(ifNoneMatch?: string) { return tags.response(ifNoneMatch) }
 
-    const exif: PhotoExif = {
-      make: tags['Make']?.description,
-      model: tags['Model']?.description,
-      lens: tags['LensModel']?.description,
-      iso: tags['ISOSpeedRatings']?.value
-        ? Number(tags['ISOSpeedRatings']?.value)
-        : undefined,
-      aperture: tags['FNumber']?.description,
-      shutter: tags['ExposureTime']?.description,
-      focalLength: tags['FocalLength']?.description,
-      // Priority: DateTimeOriginal -> DateTime -> CreateDate
-      date:
-        tags['DateTimeOriginal']?.description ||
-        tags['DateTime']?.description ||
-        tags['CreateDate']?.description,
-    }
-
-    let width = tags['Image Width']?.value
-      ? Number(tags['Image Width']?.value)
-      : undefined
-    let height = tags['Image Height']?.value
-      ? Number(tags['Image Height']?.value)
-      : undefined
-
-    // Check Orientation to swap width/height if needed
-    // Orientation values 5, 6, 7, 8 imply 90 or 270 rotation
-    // 6 = Rotate 90 CW, 8 = Rotate 270 CW
-    const orientation = tags['Orientation']?.value
-    if (width && height && orientation) {
-      const o = Number(orientation)
-      if (o >= 5 && o <= 8) {
-        [width, height] = [height, width]
-      }
-    }
-
-    return { exif, width, height }
-  } catch (error) {
-    console.error(`Error reading EXIF:`, error)
-    return undefined
-  }
+export function getPhotoPageResponse(options: PageOptions, ifNoneMatch?: string) {
+  const version = photoDatabase.version()
+  if (version !== pagesVersion) { pages.clear(); pagesVersion = version }
+  const key = JSON.stringify(options)
+  const cache = pages.get(key) ?? new PhotoListCache(async () => photoDatabase.page(options), () => photoDatabase.version())
+  pages.delete(key)
+  pages.set(key, cache)
+  if (pages.size > 64) pages.delete(pages.keys().next().value!)
+  return cache.response(ifNoneMatch)
 }
 
-export async function getPhotos(): Promise<Photo[]> {
-  return await storage.list()
+// Defer body parsing and file reads until admission; callers must not preload the buffer.
+export function savePhoto(readFile: () => Promise<File>, signal?: AbortSignal): Promise<string> {
+  return imageQueue.run(async () => {
+    const file = await readFile()
+    signal?.throwIfAborted()
+    return savePhotoFile(file, signal)
+  }, signal)
 }
 
-// Helper to process image data using a provided buffer
-async function processImage(buffer: ArrayBuffer | Buffer) {
-  const thumbnailBuffer = await generateThumbnailBuffer(buffer)
-  const info = await getImageInfo(buffer)
-  return { thumbnailBuffer, info }
-}
-
-export async function savePhoto(file: File): Promise<string> {
-  const fileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-
-  // Load the buffer ONCE.
-  // This avoids double allocation (once in processImage, once in storage.save)
+async function savePhotoFile(file: File, signal?: AbortSignal): Promise<string> {
+  if (!file.name.trim() || file.name.length > 1024) throw new InvalidImageError('Invalid filename')
   const buffer = await file.arrayBuffer()
-
-  // Process image properties using the loaded buffer
-  const { thumbnailBuffer, info } = await processImage(buffer)
-
-  const newPhoto: Photo = {
-    id: fileName,
-    name: fileName,
-    src: `/uploads/${fileName}`,
-    thumbnailSrc: `/thumbnails/thumb_${fileName}.avif`,
-    width: info?.width,
-    height: info?.height,
-    exif: info?.exif,
-    date: info?.exif?.date
-      ? format(
-        parse(info.exif.date, 'yyyy:MM:dd HH:mm:ss', new Date()),
-        'yyyy-MM-dd HH:mm:ss',
-      )
-      : undefined,
-  }
-
-  // Pass the already loaded buffer to storage
-  await storage.save(fileName, buffer, thumbnailBuffer, newPhoto)
-
-  return fileName
+  signal?.throwIfAborted()
+  return storage.ingest(buffer, { name: file.name })
 }
 
 export async function deletePhoto(id: string): Promise<boolean> {
-  return await storage.delete(id)
+  return photoDatabase.delete(id)
 }
 
 export async function updatePhoto(id: string, updates: Partial<Photo>): Promise<void> {
-  return await storage.update(id, updates)
+  photoDatabase.updateMany([{ id, partial: updates }])
 }
 
 export async function updatePhotos(updates: { id: string, partial: Partial<Photo> }[]): Promise<void> {
-  return await storage.updateMany(updates)
+  photoDatabase.updateMany(updates)
 }

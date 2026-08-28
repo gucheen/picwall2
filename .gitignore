@@ -42,7 +42,19 @@ yarn-error.log*
 
 public/thumbnails/*
 public/uploads/*
-.sessions.json
+.sessions.json*
+*.key
+*.p12
+*.pfx
+*.sqlite*
+*.db
+*.db-*
+*.log
+/backups/
+/manifest*.json
+/.agents/
+/.codex/
 data
+files
 dist
 compose.yml

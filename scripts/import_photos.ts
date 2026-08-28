@@ -1,87 +1,47 @@
-import { readdir } from 'node:fs/promises';
-import path from 'node:path';
-import { savePhoto } from '../server/photos';
-import { storage } from '../server/storage';
+import { readdir, realpath } from 'node:fs/promises'
+import path from 'node:path'
+import { createLibrary } from '../server/library/config'
+import type { Library } from '../server/library/service'
 
-const PHOTOS_DIR = process.argv[2] || './photos';
-
-async function main() {
-    console.log(`Scanning directory: ${PHOTOS_DIR}`);
-
-    // 1. Get existing photos from DB to avoid duplicates
-    const existingPhotos = await storage.list();
-    const existingIds = new Set(existingPhotos.map(p => p.id));
-    console.log(`Found ${existingIds.size} existing photos in DB.`);
-
-    // 2. Read local directory
+let library: Library | undefined
+try {
+  const args = process.argv.slice(2)
+  const directory = await realpath(args[0] && !args[0].startsWith('--') ? args.shift()! : './photos')
+  let root: string | undefined
+  if (args.length) {
+    if (args.shift() !== '--root' || !args[0] || args[0].startsWith('--')) throw new Error('Usage: bun scripts/import_photos.ts [directory] [--root library]')
+    root = path.resolve(args.shift()!)
+  }
+  if (args.length) throw new Error('Unexpected import arguments')
+  library = await createLibrary(root)
+  const files = (await readdir(directory, { withFileTypes: true }))
+    .filter(entry => entry.isFile() && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(entry.name))
+    .map(entry => entry.name).sort()
+  let skipped = 0
+  let imported = 0
+  let failed = 0
+  for (const name of files) {
     try {
-        // Ensure directory exists
-        const dirFile = Bun.file(PHOTOS_DIR);
-        // Bun.file check for directory is tricky, better use readdir and catch
-
-        let files: string[] = [];
-        try {
-            files = await readdir(PHOTOS_DIR);
-        } catch (e) {
-            console.error(`Directory not found or inaccessible: ${PHOTOS_DIR}`);
-            return;
-        }
-
-        console.log(`Found ${files.length} files in directory.`);
-        let importedCount = 0;
-        let skippedCount = 0;
-
-        for (const file of files) {
-            // Filter image extensions
-            if (!file.match(/\.(jpg|jpeg|png|gif|avif|webp)$/i)) continue;
-
-            const filePath = path.join(PHOTOS_DIR, file);
-            const fileObj = Bun.file(filePath);
-
-            // Sanitize name to match savePhoto logic for ID generation
-            const sanitizedName = file.replace(/[^a-zA-Z0-9.-]/g, '_');
-
-            // Check DB
-            if (existingIds.has(sanitizedName)) {
-                // console.log(`[SKIP] Already in DB: ${file}`);
-                skippedCount++;
-                continue;
-            }
-
-            // Optional: Check Storage Service (to avoid re-upload if logic allows, 
-            // but requirement says "process as new upload" if not present. 
-            // If we interpret "not present" as "not in DB OR not in storage", 
-            // and we want to recover "in storage but not DB", we still need to run savePhoto (or part of it).
-            // savePhoto overwrites, which is safe for consistency.
-
-            // Check if exists in storage (just for logging/info)
-            const existsInUploads = await storage.get(sanitizedName, 'uploads');
-            if (existsInUploads) {
-                console.log(`[INFO] File exists in storage but not DB: ${sanitizedName}. Re-importing to fix DB.`);
-            }
-
-            console.log(`[IMPORT] Processing: ${file} -> ${sanitizedName}`);
-
-            try {
-                const buffer = await fileObj.arrayBuffer();
-                const uploadFile = new File([buffer], file, { type: fileObj.type });
-
-                await savePhoto(uploadFile);
-                importedCount++;
-            } catch (err) {
-                console.error(`[ERROR] Failed to import ${file}:`, err);
-            }
-        }
-
-        console.log('------------------------------------------------');
-        console.log(`Import completed.`);
-        console.log(`Skipped: ${skippedCount}`);
-        console.log(`Imported: ${importedCount}`);
-        console.log('------------------------------------------------');
-
+      const filename = path.join(directory, name)
+      const source = 'file:' + filename
+      const previous = library.catalog.source(source)
+      const id = await library.ingest(await Bun.file(filename).bytes(), { name }, source)
+      if (previous) { skipped++; console.log(`Unchanged: ${name}`) }
+      else { imported++; console.log(`Imported: ${name} (${id})`) }
+      const hash = library.catalog.record(id)!.asset_hash
+      const job = library.catalog.db.query<{ error: string | null }, [string]>(
+        "SELECT error FROM jobs WHERE asset_hash=? AND status='failed' LIMIT 1").get(hash)
+      if (job) throw new Error('Original saved; derivative failed: ' + job.error)
     } catch (error) {
-        console.error("Unexpected error:", error);
+      failed++
+      process.exitCode = 1
+      console.error(`Failed to import ${name}:`, error)
     }
+  }
+  console.log(`Import completed. Imported: ${imported}; unchanged: ${skipped}; failed: ${failed}`)
+} catch (error) {
+  process.exitCode = 1
+  console.error('Import failed:', error)
+} finally {
+  await library?.close()
 }
-
-main();

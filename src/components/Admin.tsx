@@ -4,9 +4,13 @@ import styles from './Admin.module.css'
 
 export default function Admin() {
   const [photos, setPhotos] = useState<Photo[]>([])
+  const [trash, setTrash] = useState<(Photo & { deleted_at: number })[]>([])
+  const [jobs, setJobs] = useState<{ asset_hash: string; status: string; error: string | null }[]>([])
+  const [notice, setNotice] = useState('')
+  const [retrying, setRetrying] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<{ name: string } | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -36,15 +40,21 @@ export default function Admin() {
 
   const fetchPhotos = () => {
     setLoading(true)
-    fetch('/api/photos')
-      .then((res) => res.json())
-      .then((data) => {
-        setPhotos(data)
+    Promise.all(['/api/photos', '/api/trash', '/api/jobs'].map(async endpoint => {
+      const response = await fetch(endpoint)
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+      return response.json()
+    }))
+      .then(([photos, trash, jobs]) => {
+        setPhotos(photos)
+        setTrash(trash)
+        setJobs(jobs.filter((job: { status: string }) => job.status !== 'complete'))
         setLoading(false)
         setSelectedIds(new Set()) // Reset selection
       })
       .catch((err) => {
         console.error('Failed to load photos', err)
+        setNotice('Failed to load the library. Please refresh and try again.')
         setLoading(false)
       })
   }
@@ -54,6 +64,7 @@ export default function Admin() {
     setUploadProgress({ current: 0, total: files.length, failed: 0 })
 
     let failedCount = 0
+    let pendingCount = 0
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
@@ -70,7 +81,7 @@ export default function Admin() {
         if (!res.ok) {
           failedCount++
           console.error(`Upload failed for ${file.name}`)
-        }
+        } else if ((await res.json()).status === 'pending') pendingCount++
       } catch (err) {
         console.error(err)
         failedCount++
@@ -85,13 +96,11 @@ export default function Admin() {
     setUploadProgress(null)
     fetchPhotos()
 
-    if (failedCount > 0) {
-      alert(`Upload complete with ${failedCount} failures`)
-    }
+    setNotice(`Upload complete. ${files.length - failedCount} originals saved${pendingCount ? `; ${pendingCount} awaiting image processing` : ''}${failedCount ? `; ${failedCount} failed to upload` : ''}.`)
   }
 
   const handleFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return
+    if (isUploading || !files || files.length === 0) return
     const fileArray = Array.from(files)
     processUploadQueue(fileArray)
   }
@@ -119,7 +128,7 @@ export default function Admin() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this photo?')) return
+    if (!confirm('Move this photo to trash? It can be restored until maintenance permanently removes it.')) return
 
     try {
       const res = await fetch(`/api/photos/${id}`, {
@@ -131,6 +140,7 @@ export default function Admin() {
         const newSelected = new Set(selectedIds)
         newSelected.delete(id)
         setSelectedIds(newSelected)
+        fetchPhotos()
       } else {
         alert('Delete failed')
       }
@@ -138,6 +148,24 @@ export default function Admin() {
       console.error(err)
       alert('Delete error')
     }
+  }
+
+  const restorePhoto = async (id: string) => {
+    try {
+      const response = await fetch(`/api/photos/${id}/restore`, { method: 'POST' })
+      if (!response.ok) throw new Error('Restore failed')
+      fetchPhotos()
+    } catch { setNotice('Could not restore the photo. Please try again.') }
+  }
+
+  const retryJobs = async () => {
+    setRetrying(true)
+    try {
+      const response = await fetch('/api/jobs/retry', { method: 'POST' })
+      if (!response.ok) throw new Error('Retry failed')
+      fetchPhotos()
+    } catch { setNotice('Could not retry image processing. Please try again.') }
+    finally { setRetrying(false) }
   }
 
   const toggleSelection = (id: string, shiftKey: boolean = false) => {
@@ -225,11 +253,11 @@ export default function Admin() {
       <div className={styles.container}>
         <h1>Admin Access Required</h1>
         <a
-          href="/api/auth/login"
+          href="/login"
           className={styles.button}
           style={{ display: 'inline-block' }}
         >
-          Login with PocketID
+          Sign in with a passkey
         </a>
       </div>
     )
@@ -240,6 +268,7 @@ export default function Admin() {
       <div className={styles.header}>
         <h1>Photo Management</h1>
         <div className={styles.actions}>
+          <a href="/admin/security" className={styles.link}>Security</a>
           {selectedIds.size > 0 && (
             <button
               onClick={handleBatchTags}
@@ -299,6 +328,18 @@ export default function Admin() {
           </div>
         </div>
       </div>
+
+      {notice && <p role="status">{notice}</p>}
+      {jobs.length > 0 && (
+        <section className={styles.statusPanel} aria-label="Image processing">
+          <h2>Image processing ({jobs.length})</h2>
+          <p>These originals are saved. Photos appear in the gallery when their previews are ready.</p>
+          <button className={styles.button} disabled={retrying} onClick={retryJobs}>
+            {retrying ? 'Processing…' : 'Retry unfinished jobs'}
+          </button>
+          <ul>{jobs.map(job => <li key={job.asset_hash}>{job.status}{job.error ? `: ${job.error}` : ''}</li>)}</ul>
+        </section>
+      )}
 
       <div className={styles.tableWrapper}>
         <table className={styles.table}>
@@ -393,7 +434,7 @@ export default function Admin() {
                     onClick={() => handleDelete(photo.id)}
                     className={styles.deleteButton}
                   >
-                    Delete
+                    Move to trash
                   </button>
                 </td>
               </tr>
@@ -401,6 +442,16 @@ export default function Admin() {
           </tbody>
         </table>
       </div>
+      <section className={styles.statusPanel} aria-label="Trash">
+        <h2>Trash ({trash.length})</h2>
+        <p>Deleted photos remain recoverable until explicit garbage collection after the retention period.</p>
+        {trash.map(photo => (
+          <div className={styles.trashRow} key={photo.id}>
+            <span>{photo.name}</span>
+            <button className={styles.button} onClick={() => restorePhoto(photo.id)}>Restore</button>
+          </div>
+        ))}
+      </section>
     </div>
   )
 }

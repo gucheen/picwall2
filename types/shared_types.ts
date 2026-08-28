@@ -18,5 +18,13 @@ export interface Photo {
   exif?: PhotoExif
   date?: string
   thumbnailSrc?: string
+  previewSrc?: string
+  previewWidth?: number
+  previewHeight?: number
   tags?: string[]
+}
+
+export interface PhotoPage {
+  photos: Photo[]
+  nextCursor: string | null
 }
