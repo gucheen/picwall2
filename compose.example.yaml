@@ -1,0 +1,39 @@
+# Runtime configuration comes from .env; the reverse proxy runs on the host.
+services:
+  picwall:
+    image: ${PICWALL_IMAGE:?Set PICWALL_IMAGE to the new release image}
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env
+    environment:
+      # Keep the listener and database paths aligned with the port and volume mappings.
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      BASE_URL: ${BASE_URL:?Set BASE_URL to the public HTTPS origin}
+      LIBRARY_ROOT: /usr/src/app/data/library-v2
+      AUTH_ROOT: /usr/src/app/data/auth
+    volumes:
+      - ./data:/usr/src/app/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/auth/status').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
