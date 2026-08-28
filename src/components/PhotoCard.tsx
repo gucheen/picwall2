@@ -38,7 +38,7 @@ const PhotoCard = memo(function PhotoCard({ photo, onClick }: PhotoCardProps) {
         viewport={{ once: true }}
       />
 
-      <span className={`${styles.overlay} ${photo.title || photo.location ? styles.hasCaption : ''}`}>
+      <span className={styles.overlay}>
         {photo.title && <span className={styles.title}>{photo.title}</span>}
         {photo.location && <span className={styles.location}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">

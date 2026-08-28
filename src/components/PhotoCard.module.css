@@ -43,7 +43,6 @@
 }
 .card:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 
-.hasCaption { opacity: 1; }
 .title { color: #fff; font-size: 1rem; font-weight: 500; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .location { display: flex; align-items: center; gap: 0.3rem; color: #eee; font-size: 0.75rem; max-width: 100%; }
 .location svg { flex-shrink: 0; }
