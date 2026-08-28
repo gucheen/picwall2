@@ -4,12 +4,13 @@ import { Hono } from 'hono'
 import { csrf } from 'hono/csrf'
 import { secureHeaders } from 'hono/secure-headers'
 import { getPhotosResponse, getPhotoPageResponse, getTagsResponse, savePhoto, deletePhoto, updatePhoto, updatePhotos } from './photos'
-import { pageOptions, InvalidPageError } from './pagination'
+import { pageOptions, adminPageOptions, InvalidPageError } from './pagination'
 import { QueueFullError } from './task-queue'
 import { createAuth } from './auth'
 import { storage, photoDatabase } from './storage'
 import type { Photo } from '../types/shared_types'
 import { normalizePhotoTitle, normalizePhotoLocation } from '../types/photo-metadata'
+import { ImportConflictError } from './library/service'
 
 const validId = (id: unknown): id is string => typeof id === 'string'
   && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id)
@@ -50,15 +51,33 @@ app.get('/api/photos', c => {
   }
 })
 app.get('/api/tags', c => getTagsResponse(c.req.header('If-None-Match')))
-app.get('/api/trash', auth.requireAuth, c => c.json(photoDatabase.trash()))
-app.get('/api/jobs', auth.requireAuth, c => c.json(photoDatabase.jobs()))
+app.get('/api/trash', auth.requireAuth, c => {
+  try {
+    const query = c.req.query()
+    return c.json('limit' in query || 'cursor' in query ? photoDatabase.trashPage(adminPageOptions(query)) : photoDatabase.trash())
+  } catch (error) {
+    if (error instanceof InvalidPageError) return c.json({ error: error.message }, 400)
+    throw error
+  }
+})
+app.get('/api/jobs', auth.requireAuth, c => {
+  try {
+    const query = c.req.query()
+    return c.json('limit' in query || 'cursor' in query ? photoDatabase.jobPage(adminPageOptions(query)) : photoDatabase.jobs())
+  } catch (error) {
+    if (error instanceof InvalidPageError) return c.json({ error: error.message }, 400)
+    throw error
+  }
+})
 app.post('/api/jobs/retry', auth.requireAuth, async c => {
-  await storage.recover()
-  return c.json({ success: true })
+  void storage.recover().catch(error => console.error('Library recovery failed:', error))
+  return c.json({ success: true }, 202)
 })
 
 app.post('/api/upload', auth.requireAuth, async (c) => {
   try {
+    const key = c.req.header('Idempotency-Key')
+    if (key !== undefined && !validId(key)) return c.json({ error: 'Invalid upload key' }, 400)
     const id = await savePhoto(async () => {
       const body = await c.req.parseBody()
       const file = body['file']
@@ -66,10 +85,11 @@ app.post('/api/upload', auth.requireAuth, async (c) => {
       if (!file.type.startsWith('image/')) throw new InvalidImageError('Invalid file type. Only images are allowed.')
       if (file.size > 50 * 1024 * 1024) throw new InvalidImageError('File too large. Max size is 50MB.')
       return file
-    }, c.req.raw.signal)
+    }, c.req.raw.signal, key ? `upload:${key}` : undefined)
     const status = photoDatabase.get(id) ? 'ready' : 'pending'
     return c.json({ success: true, id, status }, status === 'ready' ? 200 : 202)
   } catch (error) {
+    if (error instanceof ImportConflictError) return c.json({ error: 'Upload key already belongs to another file' }, 409)
     if (error instanceof InvalidImageError) return c.json({ error: error.message }, 400)
     if (error instanceof QueueFullError) {
       c.header('Retry-After', '2')

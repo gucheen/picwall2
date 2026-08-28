@@ -1,9 +1,9 @@
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
-import type { Photo, PhotoPage } from '../../types/shared_types'
+import type { Photo, PhotoPage, CursorPage, TrashedPhoto, JobPage } from '../../types/shared_types'
 import { normalizePhotoTitle, normalizePhotoLocation } from '../../types/photo-metadata'
-import { decodeCursor, encodeCursor, type PageOptions } from '../pagination'
+import { decodeCursor, encodeCursor, decodeAdminCursor, encodeAdminCursor, type PageOptions, type AdminPageOptions } from '../pagination'
 import type { Asset, Variant } from './model'
 
 export interface PhotoRecord {
@@ -55,7 +55,7 @@ export class Catalog {
       this.db = new Database(path.join(root, 'catalog.sqlite'), { create: true, strict: true })
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;')
       const version = this.db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version
-      if (![0, 2, 3].includes(version)) throw new Error('Unsupported catalog version: ' + version)
+      if (![0, 2, 3, 4].includes(version)) throw new Error('Unsupported catalog version: ' + version)
       this.db.transaction(() => {
         if (version === 2) this.db.exec('ALTER TABLE photos ADD COLUMN title TEXT; ALTER TABLE photos ADD COLUMN location TEXT;')
         this.db.exec(schema)
@@ -71,6 +71,20 @@ export class Catalog {
   assets() { return this.db.query<Asset, []>('SELECT * FROM assets ORDER BY hash').all() }
   variants() { return this.db.query<Variant, []>('SELECT * FROM variants ORDER BY asset_hash,recipe,kind').all() }
   jobs() { return this.db.query<Job, []>('SELECT * FROM jobs ORDER BY updated_at,asset_hash').all() }
+  jobPage({ limit, cursor }: AdminPageOptions): JobPage {
+    const after = cursor === undefined ? undefined : decodeAdminCursor(cursor, 'jobs')
+    const records = this.db.query<Job, (string | number)[]>(`SELECT * FROM jobs WHERE status!='complete'
+      ${after ? 'AND (asset_hash,recipe)>(?,?)' : ''} ORDER BY asset_hash,recipe LIMIT ?`)
+      .all(...(after ? [after.id, after.recipe!] : []), limit + 1)
+    const items = records.slice(0, limit)
+    const last = items.at(-1)
+    const counts: JobPage['counts'] = { pending: 0, running: 0, failed: 0, complete: 0 }
+    for (const row of this.db.query<{ status: Job['status']; count: number }, []>('SELECT status,COUNT(*) AS count FROM jobs GROUP BY status').all()) {
+      counts[row.status] = row.count
+    }
+    return { items, counts, photoVersion: this.version(), nextCursor: records.length > limit && last
+      ? encodeAdminCursor({ kind: 'jobs', id: last.asset_hash, recipe: last.recipe }) : null }
+  }
   pendingJobs(generation: string, limit: number) {
     return this.db.query<Job, [string, number]>("SELECT * FROM jobs WHERE recipe=? AND status='pending' ORDER BY updated_at,asset_hash LIMIT ?").all(generation, limit)
   }
@@ -141,8 +155,7 @@ export class Catalog {
   delete(id: string, now = Date.now()) { return this.db.query('UPDATE photos SET deleted_at=? WHERE id=? AND deleted_at IS NULL').run(now, id).changes > 0 }
   restore(id: string) { return this.db.query('UPDATE photos SET deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL').run(id).changes > 0 }
   version() {
-    const row = this.db.query<{ changes: number; data_version: number }, []>('SELECT total_changes() AS changes,data_version FROM pragma_data_version').get()!
-    return `${row.changes}:${row.data_version}`
+    return this.setting('public-version')!
   }
   close() {
     if (this.closed) return
@@ -184,6 +197,16 @@ export class Catalog {
     return this.db.query<PhotoView, []>(`${photoQuery} WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC,photos.id`).all()
       .map(record => ({ ...this.map(record), deleted_at: record.deleted_at! }))
   }
+  trashPage({ limit, cursor }: AdminPageOptions): CursorPage<TrashedPhoto> {
+    const after = cursor === undefined ? undefined : decodeAdminCursor(cursor, 'trash')
+    const records = this.db.query<PhotoView, (string | number)[]>(`${photoQuery} WHERE photos.deleted_at IS NOT NULL
+      ${after ? 'AND (photos.deleted_at,photos.id)<(?,?)' : ''} ORDER BY photos.deleted_at DESC,photos.id DESC LIMIT ?`)
+      .all(...(after ? [after.time!, after.id] : []), limit + 1)
+    const items = records.slice(0, limit).map(record => ({ ...this.map(record), deleted_at: record.deleted_at! }))
+    const last = items.at(-1)
+    return { items, nextCursor: records.length > limit && last
+      ? encodeAdminCursor({ kind: 'trash', id: last.id, time: last.deleted_at }) : null }
+  }
   manifest(): Manifest {
     return { version: 2, exported_at: new Date().toISOString(), assets: this.assets(), variants: this.variants(),
       photos: this.db.query<PhotoRecord & { tag_json: string }, []>(`SELECT photos.*,
@@ -220,18 +243,43 @@ export function validateMetadata(metadata: Metadata) {
     || metadata.tags.some(tag => typeof tag !== 'string' || tag.length > 256))) throw new Error('Invalid tags')
 }
 
+// Triggers keep the public revision transactional, including maintenance and other SQL writers.
+const publicVersionTriggers = [
+  ['photos', 'INSERT', `NEW.deleted_at IS NULL AND EXISTS (SELECT 1 FROM assets WHERE hash=NEW.asset_hash AND active_recipe IS NOT NULL)`],
+  ['photos', 'UPDATE', `(OLD.deleted_at IS NULL OR NEW.deleted_at IS NULL) AND EXISTS
+    (SELECT 1 FROM assets WHERE hash IN (OLD.asset_hash,NEW.asset_hash) AND active_recipe IS NOT NULL)`],
+  ['photos', 'DELETE', `OLD.deleted_at IS NULL AND EXISTS (SELECT 1 FROM assets WHERE hash=OLD.asset_hash AND active_recipe IS NOT NULL)`],
+  ['assets', 'UPDATE', `(OLD.active_recipe IS NOT NULL OR NEW.active_recipe IS NOT NULL) AND EXISTS
+    (SELECT 1 FROM photos WHERE asset_hash=NEW.hash AND deleted_at IS NULL)`],
+  ...(['INSERT', 'UPDATE', 'DELETE'] as const).map(event => {
+    const row = event === 'DELETE' ? 'OLD' : 'NEW'
+    return ['photo_tags', event, `EXISTS (SELECT 1 FROM photos JOIN assets ON assets.hash=photos.asset_hash
+      WHERE photos.id=${row}.photo_id AND photos.deleted_at IS NULL AND assets.active_recipe IS NOT NULL)`]
+  }),
+  ...(['INSERT', 'UPDATE', 'DELETE'] as const).map(event => {
+    const row = event === 'DELETE' ? 'OLD' : 'NEW'
+    return ['variants', event, `EXISTS (SELECT 1 FROM assets JOIN photos ON photos.asset_hash=assets.hash
+      WHERE assets.hash=${row}.asset_hash AND assets.active_recipe=${row}.recipe AND photos.deleted_at IS NULL)`]
+  }),
+].map(([table, event, condition]) => `CREATE TRIGGER IF NOT EXISTS public_${table}_${event} AFTER ${event} ON ${table}
+  WHEN ${condition} BEGIN UPDATE settings SET value=CAST(value AS INTEGER)+1 WHERE key='public-version'; END`)
+
 const schema = [
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS assets (hash TEXT PRIMARY KEY, original_key TEXT NOT NULL UNIQUE, mime TEXT NOT NULL, bytes INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, active_recipe TEXT, created_at INTEGER NOT NULL)',
   'CREATE TABLE IF NOT EXISTS photos (id TEXT PRIMARY KEY, asset_hash TEXT NOT NULL REFERENCES assets(hash), name TEXT NOT NULL, date TEXT, exif TEXT, created_at TEXT NOT NULL, deleted_at INTEGER, metadata_locked INTEGER NOT NULL DEFAULT 0, title TEXT, location TEXT)',
   'CREATE INDEX IF NOT EXISTS photos_asset ON photos(asset_hash)',
   "CREATE INDEX IF NOT EXISTS photos_order ON photos(COALESCE(date,'') DESC,created_at DESC,id DESC) WHERE deleted_at IS NULL",
+  'CREATE INDEX IF NOT EXISTS photos_trash ON photos(deleted_at DESC,id DESC) WHERE deleted_at IS NOT NULL',
   'CREATE TABLE IF NOT EXISTS tags (name TEXT PRIMARY KEY)',
   'CREATE TABLE IF NOT EXISTS photo_tags (photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE, tag TEXT NOT NULL REFERENCES tags(name), PRIMARY KEY(photo_id,tag))',
   'CREATE INDEX IF NOT EXISTS tags_photo ON photo_tags(tag,photo_id)',
   "CREATE TABLE IF NOT EXISTS variants (asset_hash TEXT NOT NULL REFERENCES assets(hash) ON DELETE CASCADE, recipe TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('thumbnail','preview')), object_key TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, bytes INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, retired_at INTEGER, PRIMARY KEY(asset_hash,recipe,kind))",
   "CREATE TABLE IF NOT EXISTS jobs (asset_hash TEXT NOT NULL REFERENCES assets(hash) ON DELETE CASCADE, recipe TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','running','failed','complete')), attempts INTEGER NOT NULL, error TEXT, updated_at INTEGER NOT NULL, PRIMARY KEY(asset_hash,recipe))",
   'CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(recipe,status,updated_at,asset_hash)',
+  "CREATE INDEX IF NOT EXISTS jobs_unfinished ON jobs(asset_hash,recipe) WHERE status!='complete'",
   'CREATE TABLE IF NOT EXISTS imports (source TEXT PRIMARY KEY, photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE, hash TEXT NOT NULL)',
-  'PRAGMA user_version=3',
+  "INSERT OR IGNORE INTO settings VALUES ('public-version','0')",
+  ...publicVersionTriggers,
+  'PRAGMA user_version=4',
 ].join(';')

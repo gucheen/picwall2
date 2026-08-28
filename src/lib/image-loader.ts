@@ -3,11 +3,17 @@ export function loadOriginalImage(
   src: string,
   onLoad: (url: string) => void,
   onProgress: (progress: number | null) => void,
+  onError: (message: string) => void = () => {},
 ): () => void {
   const xhr = new XMLHttpRequest()
   let objectUrl: string | undefined
   let disposed = false
   const finish = () => { if (!disposed) onProgress(null) }
+  const fail = () => {
+    if (disposed) return
+    finish()
+    onError('Could not load the original. Please try again.')
+  }
 
   xhr.open('GET', src, true)
   xhr.responseType = 'blob'
@@ -22,12 +28,12 @@ export function loadOriginalImage(
     if (xhr.status === 200) {
       objectUrl = URL.createObjectURL(xhr.response)
       onLoad(objectUrl)
-    }
-    finish()
+      finish()
+    } else fail()
   }
-  xhr.onerror = finish
-  xhr.onabort = finish
-  xhr.ontimeout = finish
+  xhr.onerror = fail
+  xhr.onabort = fail
+  xhr.ontimeout = fail
   onProgress(0)
   xhr.send()
 

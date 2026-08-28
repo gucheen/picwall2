@@ -1,19 +1,30 @@
-import { useState, useEffect } from 'react'
-import type { Photo } from '../../types/shared_types'
+import { useState, useEffect, useRef } from 'react'
+import type { Photo, TrashedPhoto, ImageJob, JobPage } from '../../types/shared_types'
 import styles from './Admin.module.css'
 import PhotoEditor from './PhotoEditor'
 import { locationLabel } from '../../types/photo-metadata'
+import { updatePhotoTags } from '../lib/batch-tags'
+import { useAdminPage } from '../lib/use-admin-page'
+import PageControls from './PageControls'
+import { uploadPhotos, type UploadItem, type UploadResult } from '../lib/upload-queue'
 
 export default function Admin() {
-  const [photos, setPhotos] = useState<Photo[]>([])
-  const [trash, setTrash] = useState<(Photo & { deleted_at: number })[]>([])
-  const [jobs, setJobs] = useState<{ asset_hash: string; status: string; error: string | null }[]>([])
   const [notice, setNotice] = useState('')
   const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [tagging, setTagging] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
+  const [failedUploads, setFailedUploads] = useState<UploadResult[]>([])
+  const uploadController = useRef<AbortController | null>(null)
+  const photoVersion = useRef<string | null>(null)
   const [user, setUser] = useState<{ name: string } | null>(null)
+  const photoPage = useAdminPage<Photo>('/api/photos', 'photos', !!user)
+  const trashPage = useAdminPage<TrashedPhoto>('/api/trash', 'items', !!user)
+  const jobPage = useAdminPage<ImageJob, JobPage>('/api/jobs', 'items', !!user)
+  const { items: photos, setItems: setPhotos } = photoPage
+  const { items: trash } = trashPage
+  const { items: jobs } = jobPage
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -23,89 +34,77 @@ export default function Admin() {
     failed: number
   } | null>(null)
 
-  // Fetch photos and auth status
   useEffect(() => {
-    fetch('/api/auth/me')
+    const controller = new AbortController()
+    fetch('/api/auth/me', { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => {
+        if (controller.signal.aborted) return
         setUser(data.user || null)
-        if (data.user) {
-          fetchPhotos()
-        } else {
-          setLoading(false)
-        }
+        setLoading(false)
       })
       .catch(() => {
-        setUser(null)
-        setLoading(false)
+        if (!controller.signal.aborted) { setUser(null); setLoading(false) }
       })
+    return () => controller.abort()
   }, [])
 
+  useEffect(() => {
+    const visible = new Set(photos.map(photo => photo.id))
+    setSelectedIds(previous => new Set([...previous].filter(id => visible.has(id))))
+  }, [photos])
+
+  useEffect(() => () => { uploadController.current?.abort() }, [])
+
+  useEffect(() => {
+    const version = jobPage.details?.photoVersion
+    if (version === undefined) return
+    if (photoVersion.current !== null && photoVersion.current !== version) photoPage.refresh()
+    photoVersion.current = version
+  }, [jobPage.details?.photoVersion, photoPage.refresh])
+
+  const counts = jobPage.details?.counts
+  useEffect(() => {
+    if (!user || jobPage.loading || !isUploading && !retrying && !(counts && counts.pending + counts.running)) return
+    const timer = setTimeout(jobPage.refresh, 2000)
+    return () => clearTimeout(timer)
+  }, [user, isUploading, retrying, counts, jobPage.loading, jobPage.refresh])
+
   const fetchPhotos = () => {
-    setLoading(true)
-    Promise.all(['/api/photos', '/api/trash', '/api/jobs'].map(async endpoint => {
-      const response = await fetch(endpoint)
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`)
-      return response.json()
-    }))
-      .then(([photos, trash, jobs]) => {
-        setPhotos(photos)
-        setTrash(trash)
-        setJobs(jobs.filter((job: { status: string }) => job.status !== 'complete'))
-        setLoading(false)
-        setSelectedIds(new Set()) // Reset selection
-      })
-      .catch((err) => {
-        console.error('Failed to load photos', err)
-        setNotice('Failed to load the library. Please refresh and try again.')
-        setLoading(false)
-      })
+    photoPage.refresh()
+    jobPage.refresh()
   }
 
-  const processUploadQueue = async (files: File[]) => {
+  const processUploadQueue = async (items: UploadItem[]) => {
+    if (uploadController.current) return
+    const controller = new AbortController()
+    uploadController.current = controller
     setIsUploading(true)
-    setUploadProgress({ current: 0, total: files.length, failed: 0 })
-
+    setFailedUploads([])
+    setUploadProgress({ current: 0, total: items.length, failed: 0 })
+    let current = 0
     let failedCount = 0
     let pendingCount = 0
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      if (!file) continue
-      const formData = new FormData()
-      formData.append('file', file)
-
-      try {
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        })
-
-        if (!res.ok) {
-          failedCount++
-          console.error(`Upload failed for ${file.name}`)
-        } else if ((await res.json()).status === 'pending') pendingCount++
-      } catch (err) {
-        console.error(err)
+    await uploadPhotos(items, result => {
+      current++
+      if (result.error) {
         failedCount++
-      }
-
-      setUploadProgress((prev) =>
-        prev ? { ...prev, current: i + 1, failed: failedCount } : null,
-      )
-    }
-
+        setFailedUploads(previous => [...previous, result])
+      } else if (result.pending) pendingCount++
+      setUploadProgress({ current, total: items.length, failed: failedCount })
+    }, controller.signal)
+    uploadController.current = null
+    if (controller.signal.aborted) return
     setIsUploading(false)
     setUploadProgress(null)
     fetchPhotos()
-
-    setNotice(`Upload complete. ${files.length - failedCount} originals saved${pendingCount ? `; ${pendingCount} awaiting image processing` : ''}${failedCount ? `; ${failedCount} failed to upload` : ''}.`)
+    setNotice(`Upload complete. ${items.length - failedCount} originals saved${pendingCount ? `; ${pendingCount} accepted for image processing` : ''}${failedCount ? `; ${failedCount} failed to upload` : ''}.`)
   }
 
   const handleFiles = (files: FileList | null) => {
     if (isUploading || !files || files.length === 0) return
     const fileArray = Array.from(files)
-    processUploadQueue(fileArray)
+    void processUploadQueue(fileArray.map(file => ({ file, key: crypto.randomUUID() })))
   }
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,11 +138,8 @@ export default function Admin() {
       })
 
       if (res.ok) {
-        setPhotos(photos.filter((p) => p.id !== id))
-        const newSelected = new Set(selectedIds)
-        newSelected.delete(id)
-        setSelectedIds(newSelected)
-        fetchPhotos()
+        setPhotos(previous => previous.filter(photo => photo.id !== id))
+        trashPage.refresh()
       } else {
         alert('Delete failed')
       }
@@ -157,7 +153,8 @@ export default function Admin() {
     try {
       const response = await fetch(`/api/photos/${id}/restore`, { method: 'POST' })
       if (!response.ok) throw new Error('Restore failed')
-      fetchPhotos()
+      trashPage.setItems(previous => previous.filter(photo => photo.id !== id))
+      photoPage.refresh()
     } catch { setNotice('Could not restore the photo. Please try again.') }
   }
 
@@ -210,7 +207,7 @@ export default function Admin() {
   }
 
   const handleBatchTags = async () => {
-    if (selectedIds.size === 0) return
+    if (selectedIds.size === 0 || tagging) return
 
     const newTagsStr = prompt(
       'Enter tags for selected photos (comma separated):',
@@ -222,31 +219,17 @@ export default function Admin() {
       .map((t) => t.trim())
       .filter(Boolean)
 
+    setTagging(true)
     try {
-      const res = await fetch('/api/photos', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ids: Array.from(selectedIds),
-          tags: newTags,
-        }),
+      await updatePhotoTags(Array.from(selectedIds), newTags, ids => {
+        const saved = new Set(ids)
+        setPhotos(previous => previous.map(photo => saved.has(photo.id) ? { ...photo, tags: newTags } : photo))
+        setSelectedIds(previous => new Set([...previous].filter(id => !saved.has(id))))
       })
-
-      if (res.ok) {
-        // Optimistic update
-        const updatedPhotos = photos.map((p) =>
-          selectedIds.has(p.id) ? { ...p, tags: newTags } : p,
-        )
-        setPhotos(updatedPhotos)
-        setSelectedIds(new Set())
-        alert('Batch update successful')
-      } else {
-        alert('Batch update failed')
-      }
-    } catch (e) {
-      console.error(e)
-      alert('Batch update error')
-    }
+      setNotice('Batch tags saved.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not update tags. Please retry.')
+    } finally { setTagging(false) }
   }
 
   if (loading) return <div className={styles.loading}>Loading...</div>
@@ -275,6 +258,7 @@ export default function Admin() {
           {selectedIds.size > 0 && (
             <button
               onClick={handleBatchTags}
+              disabled={tagging}
               className={styles.button}
               style={{
                 marginRight: '1rem',
@@ -333,17 +317,24 @@ export default function Admin() {
       </div>
 
       {notice && <p role="status">{notice}</p>}
-      {jobs.length > 0 && (
+      {failedUploads.length > 0 && <section className={styles.statusPanel} aria-label="Failed uploads">
+        <h2>Failed uploads ({failedUploads.length})</h2>
+        <ul>{failedUploads.map(result => <li key={result.item.key}>{result.item.file.name}: {result.error}</li>)}</ul>
+        <button className={styles.button} disabled={isUploading} onClick={() => void processUploadQueue(failedUploads.map(result => result.item))}>Retry failed uploads</button>
+      </section>}
         <section className={styles.statusPanel} aria-label="Image processing">
-          <h2>Image processing ({jobs.length})</h2>
+          <h2>Image processing</h2>
+          {counts && <p role="status">{counts.pending} queued · {counts.running} processing · {counts.failed} failed</p>}
           <p>These originals are saved. Photos appear in the gallery when their previews are ready.</p>
           <button className={styles.button} disabled={retrying} onClick={retryJobs}>
             {retrying ? 'Processing…' : 'Retry unfinished jobs'}
           </button>
-          <ul>{jobs.map(job => <li key={job.asset_hash}>{job.status}{job.error ? `: ${job.error}` : ''}</li>)}</ul>
+          <ul>{jobs.map(job => <li key={`${job.asset_hash}:${job.recipe}`}>{job.status}{job.error ? `: ${job.error}` : ''}</li>)}</ul>
+          {!jobs.length && !jobPage.loading && !jobPage.error && <p>No unfinished jobs on this page.</p>}
+          <PageControls label="Jobs" {...jobPage} />
         </section>
-      )}
 
+      <PageControls label="Photos" {...photoPage} disabled={tagging} />
       <div className={styles.tableWrapper}>
         <table className={styles.table}>
           <thead>
@@ -355,6 +346,8 @@ export default function Admin() {
                     photos.length > 0 && selectedIds.size === photos.length
                   }
                   onChange={toggleSelectAll}
+                  disabled={tagging}
+                  aria-label="Select all photos on this page"
                 />
               </th>
               <th>Thumbnail</th>
@@ -379,6 +372,8 @@ export default function Admin() {
                   <input
                     type="checkbox"
                     checked={selectedIds.has(photo.id)}
+                    disabled={tagging}
+                    aria-label={`Select ${photo.title || photo.name}`}
                     onClick={(e) =>
                       toggleSelection(
                         photo.id,
@@ -393,6 +388,8 @@ export default function Admin() {
                     src={photo.thumbnailSrc || photo.src}
                     alt={photo.title || photo.name}
                     className={styles.thumbnail}
+                    loading="lazy"
+                    decoding="async"
                   />
                 </td>
                 <td className={styles.photoDescription}>
@@ -422,8 +419,9 @@ export default function Admin() {
           </tbody>
         </table>
       </div>
+      {!photos.length && !photoPage.loading && !photoPage.error && <p>No photos on this page.</p>}
       <section className={styles.statusPanel} aria-label="Trash">
-        <h2>Trash ({trash.length})</h2>
+        <h2>Trash</h2>
         <p>Deleted photos remain recoverable until explicit garbage collection after the retention period.</p>
         {trash.map(photo => (
           <div className={styles.trashRow} key={photo.id}>
@@ -431,6 +429,7 @@ export default function Admin() {
             <button className={styles.button} onClick={() => restorePhoto(photo.id)}>Restore</button>
           </div>
         ))}
+        <PageControls label="Trash" {...trashPage} />
       </section>
       {editingPhoto && <PhotoEditor key={editingPhoto.id} photo={editingPhoto} onClose={() => setEditingPhoto(null)}
         onSaved={updated => {

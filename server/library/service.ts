@@ -4,9 +4,12 @@ import { Catalog, validateMetadata, type Job, type Metadata } from './catalog'
 import { originalKey, recipeId, sha256, validKey, type Asset, type Variant, variantKey } from './model'
 import type { ObjectStore } from './objects'
 
+export class ImportConflictError extends Error {}
+
 export class Library {
   readonly catalog: Catalog
   private draining?: Promise<void>
+  private wakeDrain?: () => void
   private recovering?: Promise<void>
   private rebuilding?: Promise<void>
   private closing?: Promise<void>
@@ -17,24 +20,24 @@ export class Library {
     this.catalog = new Catalog(root, objects.identity)
   }
 
-  ingest(bytes: ArrayBuffer | Uint8Array, metadata: Metadata, source?: string): Promise<string> {
+  ingest(bytes: ArrayBuffer | Uint8Array, metadata: Metadata, source?: string, waitForProcessing = true): Promise<string> {
     if (this.closing) return Promise.reject(new Error('Library is closing'))
-    const operation = this.ingestPhoto(bytes, metadata, source)
+    const operation = this.ingestPhoto(bytes, metadata, source, waitForProcessing)
     this.operations.add(operation)
     void operation.then(() => this.operations.delete(operation), () => this.operations.delete(operation))
     return operation
   }
 
-  private async ingestPhoto(input: ArrayBuffer | Uint8Array, metadata: Metadata, source?: string) {
+  private async ingestPhoto(input: ArrayBuffer | Uint8Array, metadata: Metadata, source: string | undefined, waitForProcessing: boolean) {
     validateMetadata(metadata)
     if (source !== undefined && (!source || typeof source !== 'string')) throw new Error('Invalid import source')
     const bytes = new Uint8Array(input instanceof Uint8Array ? input : new Uint8Array(input))
     const hash = sha256(bytes)
     const previous = source ? this.catalog.source(source) : null
     if (previous) {
-      if (previous.hash !== hash) throw new Error('Import source changed: ' + source)
+      if (previous.hash !== hash) throw new ImportConflictError('Import source changed: ' + source)
       this.retryIncomplete(hash)
-      await this.drain()
+      await this.startProcessing(waitForProcessing)
       return previous.photo_id
     }
     const info = await inspectImage(bytes)
@@ -43,15 +46,15 @@ export class Library {
     await this.objects.put(asset.original_key, bytes, asset.mime)
     const raced = source ? this.catalog.source(source) : null
     if (raced) {
-      if (raced.hash !== hash) throw new Error('Import source changed: ' + source)
+      if (raced.hash !== hash) throw new ImportConflictError('Import source changed: ' + source)
       this.retryIncomplete(hash)
-      await this.drain()
+      await this.startProcessing(waitForProcessing)
       return raced.photo_id
     }
     const id = this.catalog.add(asset, metadata.preserveMetadata ? metadata : {
       ...metadata, exif: metadata.exif ?? info.exif, date: metadata.date ?? exifDate(info.exif?.date),
     }, recipeId, source)
-    await this.drain()
+    await this.startProcessing(waitForProcessing)
     return id
   }
 
@@ -101,16 +104,37 @@ export class Library {
   }
 
   private async drain(): Promise<void> {
+    this.wakeDrain?.()
     this.draining ??= this.runPending().finally(() => { this.draining = undefined })
     await this.draining
     if (this.catalog.pendingJobs(recipeId, 1).length) await this.drain()
   }
 
+  private startProcessing(wait: boolean): Promise<void> | undefined {
+    const processing = this.drain()
+    if (wait) return processing
+    // The original and job are durable before responding; close() still waits for the worker.
+    void processing.catch(error => console.error('Image processing stopped:', error))
+  }
+
   private async runPending() {
-    for (;;) {
-      const jobs = this.catalog.pendingJobs(recipeId, imageConcurrency)
-      if (!jobs.length) return
-      await Promise.all(jobs.map(job => this.process(job)))
+    const active = new Set<Promise<void>>()
+    try {
+      for (;;) {
+        const wake = Promise.withResolvers<void>()
+        this.wakeDrain = wake.resolve
+        while (active.size < imageConcurrency) {
+          const job = this.catalog.pendingJobs(recipeId, 1)[0]
+          if (!job) break
+          const work = this.process(job).finally(() => { active.delete(work) })
+          active.add(work)
+        }
+        if (!active.size) return
+        await Promise.race([...active, wake.promise])
+      }
+    } finally {
+      this.wakeDrain = undefined
+      await Promise.allSettled(active)
     }
   }
 

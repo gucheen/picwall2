@@ -51,6 +51,8 @@ Compose persists `./data` on the host: `library-v2/` contains the photo catalog 
 
 - **Browse:** open `/`, filter by tag, and click a photo to see its details. Choose **Load original** or **Open original** for the full image.
 - **Manage:** open `/admin` to upload photos, edit their details, or move photos to trash. Choose **Edit** beside a photo to set its title, location, and tags; batch tagging remains available.
+- **Large libraries:** photos, trash, and unfinished processing jobs have separate 60-item pages. Select-all and Shift-selection apply to the current photo page. Edits update the current rows without reloading the whole library.
+- **Uploads:** up to two files upload concurrently. Saved originals are processed in the background; the processing panel refreshes while jobs are queued or running. Busy-server and connection failures retry automatically with the same upload identity. **Retry failed uploads** retries only failed files; keep the page open to retain their retry identities.
 - **Locations:** enter a place name and optionally both latitude and longitude in WGS84 decimal degrees. **View on Google Maps** opens a pin at the coordinates; a name alone offers **Search on Google Maps**. Leave fields blank to remove them. Titles do not rename original files. Saved locations are public; GPS is not automatically copied into the location marker.
 - **Manage Passkeys:** open `/admin/security` to add or remove keys. Keep a backup key; there is no password or email fallback.
 - **Import a folder, back up, or recover access:** see the [operations guide](docs/operations.md).
@@ -96,6 +98,8 @@ bun test
 bun run build
 bun run start
 ```
+
+Run `bun run test:browser` for an isolated, browser-based regression suite with generated photos and no deployment credentials. See [browser tests](docs/browser-tests.md) for the automated checks and manual keyboard/mobile checks.
 
 The production server defaults to port 3000. Set `BASE_URL` to its browser-facing origin before initializing a production account, and keep development and production data separate. Production deployments need the complete `dist/` directory and production dependencies.
 

@@ -6,6 +6,8 @@ import { Library } from '../server/library/service'
 import { LocalObjects, S3Objects } from '../server/library/objects'
 import { originalKey, recipeId, sha256 } from '../server/library/model'
 import { bitmap } from './helpers'
+import { Database } from 'bun:sqlite'
+import { PhotoListCache } from '../server/photo-cache'
 
 let directory: string
 let library: Library
@@ -25,6 +27,79 @@ afterEach(async () => {
 })
 
 describe('content-addressed library', () => {
+  test('public caches ignore job state but invalidate on committed metadata and external SQL changes', async () => {
+    const id = await library.ingest(png, { name: 'cached.png', tags: ['keep'] })
+    const list = spyOn(library.catalog, 'list')
+    const cache = new PhotoListCache(async () => library.catalog.list(), () => library.catalog.version())
+    const initial = await cache.response()
+    const version = library.catalog.version()
+    library.catalog.db.exec("UPDATE jobs SET attempts=attempts+1, status='failed', error='Retry me'")
+    expect(library.catalog.version()).toBe(version)
+    expect((await cache.response(initial.headers.get('etag')!)).status).toBe(304)
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(() => library.catalog.updateMany([{ id, partial: { title: 'Rollback', tags: [42 as unknown as string] } }])).toThrow()
+    expect(library.catalog.version()).toBe(version)
+    library.catalog.updateMany([{ id, partial: { title: 'Changed', tags: ['new'] } }])
+    const changed = await cache.response(initial.headers.get('etag')!)
+    expect(changed.status).toBe(200)
+    expect((await changed.json())[0]).toMatchObject({ title: 'Changed', tags: ['new'] })
+    const external = new Database(path.join(directory, 'catalog.sqlite'))
+    try { external.query('UPDATE photos SET title=? WHERE id=?').run('External', id) }
+    finally { external.close() }
+    expect((await (await cache.response()).json())[0].title).toBe('External')
+    const beforeDelete = library.catalog.version()
+    library.catalog.delete(id)
+    expect(library.catalog.version()).not.toBe(beforeDelete)
+    expect(await (await cache.response()).json()).toEqual([])
+    library.catalog.restore(id)
+    expect(await (await cache.response()).json()).toHaveLength(1)
+  })
+
+  test('background ingest returns after durable registration and close still waits for processing', async () => {
+    const gate = Promise.withResolvers<void>()
+    const read = objects.read.bind(objects)
+    const intercepted = spyOn(objects, 'read').mockImplementation(async key => {
+      if (key.startsWith('originals/')) await gate.promise
+      return read(key)
+    })
+    try {
+      const id = await library.ingest(png, { name: 'background.png' }, 'upload:test', false)
+      expect(library.catalog.record(id)).toBeDefined()
+      expect(await read(originalKey(sha256(png)))).toEqual(png)
+      expect(library.catalog.get(id)).toBeUndefined()
+      expect(library.catalog.jobs()[0]?.status).toBe('running')
+      let closed = false
+      const closing = library.close().then(() => { closed = true })
+      await Promise.resolve()
+      expect(closed).toBe(false)
+      gate.resolve()
+      await closing
+      library = new Library(directory, objects)
+      expect(library.catalog.get(id)?.previewSrc).toBeDefined()
+    } finally { gate.resolve(); intercepted.mockRestore() }
+  })
+
+  test('new work uses a free worker while an unrelated original read is blocked', async () => {
+    const gate = Promise.withResolvers<void>()
+    const secondRead = Promise.withResolvers<void>()
+    const read = objects.read.bind(objects)
+    const firstKey = originalKey(sha256(png))
+    const intercepted = spyOn(objects, 'read').mockImplementation(async key => {
+      if (key === firstKey) await gate.promise
+      else if (key.startsWith('originals/')) secondRead.resolve()
+      return read(key)
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await library.ingest(png, { name: 'blocked.png' }, undefined, false)
+      const other = await new Bun.Image(bitmap(65, 33)).png().bytes()
+      await library.ingest(other, { name: 'free-worker.png' }, undefined, false)
+      await Promise.race([secondRead.promise, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('New work waited for the blocked original')), 1000)
+      })])
+    } finally { clearTimeout(timer); gate.resolve(); intercepted.mockRestore() }
+  })
+
   test('upgrades version 2 catalogs without changing existing photos and persists edited metadata', async () => {
     const id = await library.ingest(png, { name: 'original.png', tags: ['keep'], date: '2025-02-03' })
     const original = library.catalog.get(id)!

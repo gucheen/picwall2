@@ -36,3 +36,23 @@ export interface PhotoPage {
   photos: Photo[]
   nextCursor: string | null
 }
+
+export interface CursorPage<T> {
+  items: T[]
+  nextCursor: string | null
+}
+
+export type TrashedPhoto = Photo & { deleted_at: number }
+export interface ImageJob {
+  asset_hash: string
+  recipe: string
+  status: 'pending' | 'running' | 'failed' | 'complete'
+  attempts: number
+  error: string | null
+  updated_at: number
+}
+
+export interface JobPage extends CursorPage<ImageJob> {
+  counts: Record<ImageJob['status'], number>
+  photoVersion: string
+}

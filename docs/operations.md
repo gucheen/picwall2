@@ -89,7 +89,7 @@ This revokes **all Passkeys, sessions, and pending enrollment requests**. Keep t
 
 ## Upgrade from an older version
 
-Libraries already using `library-v2/catalog.sqlite` upgrade automatically from catalog schema 2 to 3 on startup to add titles and locations. Stop the service and back up before upgrading. The library path and object storage do not change. Older application versions cannot open schema 3; rolling back requires the pre-upgrade backup.
+Libraries already using `library-v2/catalog.sqlite` upgrade automatically from catalog schema 2 or 3 to 4 on startup. Schema 4 adds pagination indexes and a transactional public-content revision for cache invalidation; schema 2 libraries also gain titles and locations. Stop the service and back up before upgrading. The library path and object storage do not change. Older application versions cannot open schema 4; rolling back requires the pre-upgrade backup.
 
 The migration below applies to legacy `photos.db` or `photos_db.json` libraries. Do not start the new service against those libraries before migration.
 

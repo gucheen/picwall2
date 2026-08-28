@@ -11,6 +11,8 @@ export default function PhotoGallery({ tag }: { tag: string | null }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const sentinel = useRef<HTMLDivElement>(null)
   const navigation = useRef(0)
+  const restoreFocus = useRef<string | null>(null)
+  const [navigating, setNavigating] = useState(false)
   const select = useCallback((photo: Photo) => { navigation.current++; setSelectedId(photo.id) }, [])
   const selectedIndex = photos.findIndex(photo => photo.id === selectedId)
   const selected = photos[selectedIndex]
@@ -32,15 +34,27 @@ export default function PhotoGallery({ tag }: { tag: string | null }) {
       {!loading && hasMore && <button className={styles.uploadLabel} onClick={() => void loadMore()}>{error ? 'Retry' : 'Load more'}</button>}
       {!loading && !error && photos.length === 0 && <p>No photos found.</p>}
     </div>
-    <AnimatePresence>
-      {selected && <DetailView photo={selected} onClose={() => { navigation.current++; setSelectedId(null) }}
-        onPrev={() => { navigation.current++; if (selectedIndex > 0) setSelectedId(photos[selectedIndex - 1]!.id) }}
+    <AnimatePresence onExitComplete={() => {
+      // Wait for the modal to leave the top layer before focusing the otherwise inert gallery.
+      requestAnimationFrame(() => {
+        if (restoreFocus.current) document.getElementById(`photo-card-${restoreFocus.current}`)?.focus({ preventScroll: true })
+      })
+    }}>
+      {selected && <DetailView photo={selected}
+        hasPrevious={selectedIndex > 0} hasNext={!navigating && (selectedIndex < photos.length - 1 || hasMore)}
+        navigationError={error}
+        onClose={() => { navigation.current++; restoreFocus.current = selected.id; setSelectedId(null); setNavigating(false) }}
+        onPrev={() => { navigation.current++; setNavigating(false); if (selectedIndex > 0) setSelectedId(photos[selectedIndex - 1]!.id) }}
         onNext={async () => {
           const request = ++navigation.current
           if (selectedIndex < photos.length - 1) setSelectedId(photos[selectedIndex + 1]!.id)
           else if (hasMore) {
+            setNavigating(true)
             const next = await loadMore()
-            if (request === navigation.current && next[0]) setSelectedId(next[0].id)
+            if (request === navigation.current) {
+              setNavigating(false)
+              if (next[0]) setSelectedId(next[0].id)
+            }
           }
         }} />}
     </AnimatePresence>

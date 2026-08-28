@@ -30,19 +30,19 @@ export function getPhotoPageResponse(options: PageOptions, ifNoneMatch?: string)
 }
 
 // Defer body parsing and file reads until admission; callers must not preload the buffer.
-export function savePhoto(readFile: () => Promise<File>, signal?: AbortSignal): Promise<string> {
+export function savePhoto(readFile: () => Promise<File>, signal?: AbortSignal, source?: string): Promise<string> {
   return imageQueue.run(async () => {
     const file = await readFile()
     signal?.throwIfAborted()
-    return savePhotoFile(file, signal)
+    return savePhotoFile(file, signal, source)
   }, signal)
 }
 
-async function savePhotoFile(file: File, signal?: AbortSignal): Promise<string> {
+async function savePhotoFile(file: File, signal?: AbortSignal, source?: string): Promise<string> {
   if (!file.name.trim() || file.name.length > 1024) throw new InvalidImageError('Invalid filename')
   const buffer = await file.arrayBuffer()
   signal?.throwIfAborted()
-  return storage.ingest(buffer, { name: file.name })
+  return storage.ingest(buffer, { name: file.name }, source, false)
 }
 
 export async function deletePhoto(id: string): Promise<boolean> {

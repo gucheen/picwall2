@@ -82,7 +82,8 @@ test.each(['http', 'error', 'timeout', 'abort'] as const)('clears download progr
   const create = spyOn(URL, 'createObjectURL').mockReturnValue('blob:unused')
   const loaded = mock((_src: string) => {})
   const progress = mock((_progress: number | null) => {})
-  const cleanup = loadOriginalImage('/broken.png', loaded, progress)
+  const failed = mock((_message: string) => {})
+  const cleanup = loadOriginalImage('/broken.png', loaded, progress, failed)
   const xhr = FakeXHR.requests[0]!
   if (event === 'http') {
     xhr.status = 404
@@ -91,5 +92,7 @@ test.each(['http', 'error', 'timeout', 'abort'] as const)('clears download progr
   expect(progress).toHaveBeenLastCalledWith(null)
   expect(loaded).not.toHaveBeenCalled()
   expect(create).not.toHaveBeenCalled()
+  expect(failed).toHaveBeenCalledTimes(1)
   cleanup()
+  expect(failed).toHaveBeenCalledTimes(1)
 })

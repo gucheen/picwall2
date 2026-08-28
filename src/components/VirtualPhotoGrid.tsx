@@ -32,7 +32,9 @@ export default function VirtualPhotoGrid({ photos, selectedId, onSelect }: {
     }
   }, [])
   const layout = useMemo(() => layoutPhotos(photos, viewport.width, viewport.columns), [photos, viewport.width, viewport.columns])
-  const visible = viewport.width ? visiblePhotos(layout.columns, viewport.top, viewport.bottom) : []
+  const order = useMemo(() => new Map(photos.map((photo, index) => [photo.id, index])), [photos])
+  const visible = viewport.width ? visiblePhotos(layout.columns, viewport.top, viewport.bottom)
+    .sort((a, b) => order.get(a.photo.id)! - order.get(b.photo.id)!) : []
 
   useEffect(() => {
     if (!selectedId) return

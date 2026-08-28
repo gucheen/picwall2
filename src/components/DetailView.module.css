@@ -1,4 +1,13 @@
 .fixedOverlay {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
   position: fixed;
   inset: 0;
   z-index: 50;
@@ -6,6 +15,10 @@
   align-items: center;
   justify-content: center;
 }
+.fixedOverlay:not([open]) { display: none; }
+.fixedOverlay::backdrop { background: transparent; }
+.fixedOverlay button:focus-visible, .fixedOverlay a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.fixedOverlay button:disabled { cursor: default; }
 
 .backdrop {
   position: absolute;
@@ -88,7 +101,8 @@
   opacity: 0;
 }
 
-.imageWrapper:hover .imageCloseButton {
+.imageWrapper:hover .imageCloseButton,
+.imageCloseButton:focus-visible {
   opacity: 1;
 }
 
@@ -172,7 +186,7 @@
 
 .label {
   font-size: 0.75rem;
-  color: #666;
+  color: #aaa;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 0.25rem;
@@ -204,7 +218,7 @@
   font-size: 0.875rem;
   line-height: 1.25rem;
   text-align: center;
-  color: #888;
+  color: #ddd;
   background: transparent;
   transition: all 0.2s;
   cursor: pointer;
@@ -263,9 +277,12 @@
 }
 
 .imageWrapper:hover .navButtonLeft,
-.imageWrapper:hover .navButtonRight {
+.imageWrapper:hover .navButtonRight,
+.navButtonLeft:focus-visible,
+.navButtonRight:focus-visible {
   opacity: 1;
 }
+.navButtonLeft:disabled, .navButtonRight:disabled { visibility: hidden; }
 
 .navButtonLeft:hover,
 .navButtonRight:hover {
@@ -278,4 +295,8 @@
 
 .navButtonRight {
   right: 0;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .imageCloseButton, .navButtonLeft, .navButtonRight { opacity: 1; }
 }

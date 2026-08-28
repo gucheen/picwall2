@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, useId } from 'react'
 import { motion } from 'motion/react'
 import type { Photo } from '../../types/shared_types'
 import { loadOriginalImage } from '../lib/image-loader'
@@ -11,6 +11,9 @@ interface DetailViewProps {
   onClose: () => void
   onNext: () => void
   onPrev: () => void
+  hasPrevious?: boolean
+  hasNext?: boolean
+  navigationError?: string | null
 }
 
 export default function DetailView({
@@ -18,45 +21,54 @@ export default function DetailView({
   onClose,
   onNext,
   onPrev,
+  hasPrevious = true,
+  hasNext = true,
+  navigationError,
 }: DetailViewProps) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
   const [imgSrc, setImgSrc] = useState(detailSource(photo))
   const [originalId, setOriginalId] = useState<string | null>(null)
   const [loadProgress, setLoadProgress] = useState<number | null>(null)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     setImgSrc(detailSource(photo))
     setOriginalId(null)
     setLoadProgress(null)
+    setLoadError('')
   }, [photo.id, photo.src, photo.thumbnailSrc, photo.previewSrc])
 
   useEffect(() => {
     if (originalId === photo.id && imgSrc !== photo.src) {
-      return loadOriginalImage(photo.src, setImgSrc, setLoadProgress)
+      return loadOriginalImage(photo.src, setImgSrc, setLoadProgress, message => {
+        setLoadError(message)
+        setOriginalId(null)
+      })
     }
   }, [originalId, photo.id, photo.src])
 
-  // Lock body scroll
   useEffect(() => {
+    const element = dialog.current!
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    element.showModal()
     return () => {
+      element.close()
       document.body.style.overflow = previousOverflow
     }
   }, [])
 
-  // Keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      if (e.key === 'ArrowRight') onNext()
-      if (e.key === 'ArrowLeft') onPrev()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose, onNext, onPrev])
-
   return (
-    <motion.div
+    <motion.dialog
+      ref={dialog}
+      aria-labelledby={titleId}
+      onCancel={event => { event.preventDefault(); onClose() }}
+      onKeyDown={event => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return
+        if (event.key === 'ArrowRight') { event.preventDefault(); if (hasNext) onNext() }
+        if (event.key === 'ArrowLeft') { event.preventDefault(); if (hasPrevious) onPrev() }
+      }}
       className={styles.fixedOverlay}
       onClick={onClose}
       initial={{ opacity: 0 }}
@@ -76,6 +88,8 @@ export default function DetailView({
             {/* Close Button Overlay */}
             <button
               className={styles.imageCloseButton}
+              aria-label="Close photo"
+              autoFocus
               onClick={(e) => {
                 e.stopPropagation()
                 onClose()
@@ -86,6 +100,8 @@ export default function DetailView({
             {/* Nav Handlers Overlay */}
             <button
               className={styles.navButtonLeft}
+              aria-label="Previous photo"
+              disabled={!hasPrevious}
               onClick={(e) => {
                 e.stopPropagation()
                 onPrev()
@@ -95,6 +111,8 @@ export default function DetailView({
             </button>
             <button
               className={styles.navButtonRight}
+              aria-label="Next photo"
+              disabled={!hasNext}
               onClick={(e) => {
                 e.stopPropagation()
                 onNext()
@@ -137,7 +155,7 @@ export default function DetailView({
           }}
         >
           <div className={styles.sidebarContent}>
-            <h2 className={styles.title}>{photo.title || photo.name}</h2>
+            <h2 id={titleId} className={styles.title}>{photo.title || photo.name}</h2>
 
             <div className={styles.groupContainer}>
               {photo.location && <div className={styles.metaGroup}>
@@ -195,9 +213,11 @@ export default function DetailView({
           </div>
 
           <div className={styles.sidebarActions}>
+            {navigationError && <p role="alert">{navigationError}. Use Next photo to retry.</p>}
+            {loadError && <p role="alert">{loadError}</p>}
             {detailSource(photo) !== photo.src && originalId !== photo.id && (
-              <button className={styles.actionButton} onClick={() => setOriginalId(photo.id)}>
-                Load original
+              <button className={styles.actionButton} onClick={() => { setLoadError(''); setOriginalId(photo.id) }}>
+                {loadError ? 'Retry original' : 'Load original'}
               </button>
             )}
             <a className={styles.actionButton} href={photo.src} target="_blank" rel="noreferrer">Open original</a>
@@ -207,7 +227,7 @@ export default function DetailView({
           </div>
         </motion.div>
       </div>
-    </motion.div>
+    </motion.dialog>
   )
 }
 

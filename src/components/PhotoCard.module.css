@@ -1,4 +1,9 @@
 .card {
+  display: block;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  font: inherit;
   position: relative;
   break-inside: avoid;
   /* Essential for masonry */
@@ -32,9 +37,11 @@
   padding: 1rem;
 }
 
-.card:hover .overlay {
+.card:hover .overlay,
+.card:focus-visible .overlay {
   opacity: 1;
 }
+.card:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 
 .hasCaption { opacity: 1; }
 .title { color: #fff; font-size: 1rem; font-weight: 500; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

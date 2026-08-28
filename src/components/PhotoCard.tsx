@@ -17,10 +17,12 @@ const PhotoCard = memo(function PhotoCard({ photo, onClick }: PhotoCardProps) {
   const displaySrc = photo.thumbnailSrc || photo.src
 
   return (
-    <div
+    <button
+      type="button"
       id={`photo-card-${photo.id}`}
       className={styles.card}
       onClick={() => onClick(photo)}
+      aria-label={`View ${photo.title || photo.name}`}
       style={{ aspectRatio }}
     >
       <motion.img
@@ -36,20 +38,20 @@ const PhotoCard = memo(function PhotoCard({ photo, onClick }: PhotoCardProps) {
         viewport={{ once: true }}
       />
 
-      <div className={`${styles.overlay} ${photo.title || photo.location ? styles.hasCaption : ''}`}>
-        {photo.title && <p className={styles.title}>{photo.title}</p>}
-        {photo.location && <p className={styles.location}>
+      <span className={`${styles.overlay} ${photo.title || photo.location ? styles.hasCaption : ''}`}>
+        {photo.title && <span className={styles.title}>{photo.title}</span>}
+        {photo.location && <span className={styles.location}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
             <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" />
           </svg>
           <span>{locationLabel(photo.location)}</span>
-        </p>}
-        <p className={styles.info}>
+        </span>}
+        <span className={styles.info}>
           {photo.date ? photo.date : 'Unknown Date'}
           {photo.exif?.model && ` • ${photo.exif.model}`}
-        </p>
-      </div>
-    </div>
+        </span>
+      </span>
+    </button>
   )
 })
 

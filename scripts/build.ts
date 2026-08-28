@@ -10,6 +10,7 @@ const frontend = await Bun.build({
   outdir: './dist/public',
   target: 'browser',
   minify: true,
+  splitting: true,
   metafile: true,
   publicPath: '/',
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },

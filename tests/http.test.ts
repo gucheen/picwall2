@@ -16,6 +16,16 @@ let base: string
 let cookie: string
 const admin = { name: 'Administrator' }
 
+async function waitForProcessing() {
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const { counts } = await (await fetch(new URL('/api/jobs?limit=1', base), { headers: { cookie } })).json()
+    if (counts.pending + counts.running === 0) return
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error('Image processing did not finish')
+}
+
 beforeAll(async () => {
   const build = Bun.spawn([Bun.which('bun')!, 'scripts/build.ts'], {
     cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: 60_000,
@@ -153,9 +163,10 @@ test('uploads UUID photos, reads variants, updates tags and soft-deletes media',
   const form = new FormData()
   form.set('file', new File([png], 'test photo.png', { type: 'image/png' }))
   const upload = await fetch(new URL('/api/upload', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin }, body: form })
-  expect(upload.status).toBe(200)
+  expect(upload.status).toBe(202)
   const uploaded = await upload.json()
-  expect(uploaded).toEqual({ success: true, id: expect.any(String), status: 'ready' })
+  expect(uploaded).toEqual({ success: true, id: expect.any(String), status: 'pending' })
+  await waitForProcessing()
   expect(uploaded.id).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/)
   const id: string = uploaded.id
   const list = await fetch(new URL('/api/photos', base), { headers: { 'If-None-Match': emptyETag } })
@@ -217,14 +228,25 @@ test('rejects malformed pagination without changing the legacy list contract', a
     expect((await fetch(new URL(`/api/photos?${query}`, base))).status).toBe(400)
   }
   expect(Array.isArray(await (await fetch(new URL('/api/photos', base))).json())).toBe(true)
+  for (const endpoint of ['/api/trash', '/api/jobs']) {
+    for (const query of ['limit=0', 'limit=101', 'cursor=bad']) {
+      expect((await fetch(new URL(`${endpoint}?${query}`, base), { headers: { cookie } })).status).toBe(400)
+    }
+    const response = await fetch(new URL(`${endpoint}?limit=1`, base), { headers: { cookie } })
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    const page = await response.json()
+    expect(page.items.length).toBeLessThanOrEqual(1)
+    expect(page.nextCursor === null || typeof page.nextCursor === 'string').toBe(true)
+  }
 })
 
 test('edits public title and location independently, validates mutations, and invalidates list and page caches', async () => {
   const form = new FormData()
   form.set('file', new File([await new Bun.Image(bitmap(64, 32)).png().blob()], 'caption.png', { type: 'image/png' }))
   const uploaded = await fetch(new URL('/api/upload', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin }, body: form })
-  expect(uploaded.status).toBe(200)
+  expect(uploaded.status).toBe(202)
   const { id } = await uploaded.json()
+  await waitForProcessing()
   const endpoint = new URL(`/api/photos/${id}`, base)
   const patch = (body: unknown) => fetch(endpoint, { method: 'PATCH', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const list = await fetch(new URL('/api/photos', base))
@@ -268,9 +290,10 @@ test('same Unicode names keep distinct IDs and shared media survives trash and r
     const form = new FormData()
     form.set('file', new File([png], '旅行 照片.png', { type: 'image/png' }))
     const response = await fetch(new URL('/api/upload', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin }, body: form })
-    expect(response.status).toBe(200)
+    expect([200, 202]).toContain(response.status)
     ids.push((await response.json()).id)
   }
+  await waitForProcessing()
   expect(new Set(ids).size).toBe(2)
   const photos: Photo[] = await (await fetch(new URL('/api/photos', base))).json()
   expect(photos).toHaveLength(2)
@@ -307,11 +330,13 @@ test('returns 202 for a saved original with failed derivatives and retries it wi
   expect(response.status).toBe(202)
   const result = await response.json()
   expect(result).toEqual({ success: true, id: expect.any(String), status: 'pending' })
+  await waitForProcessing()
   expect(await (await fetch(new URL('/api/photos', base))).json()).toEqual([])
   const jobs = await (await fetch(new URL('/api/jobs', base), { headers: { cookie, origin: new URL(base).origin } })).json()
   expect(jobs.find((job: { asset_hash: string }) => job.asset_hash === hash)).toMatchObject({ status: 'failed' })
   await rm(blocker)
-  expect((await fetch(new URL('/api/jobs/retry', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin } })).status).toBe(200)
+  expect((await fetch(new URL('/api/jobs/retry', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin } })).status).toBe(202)
+  await waitForProcessing()
   const photos: Photo[] = await (await fetch(new URL('/api/photos', base))).json()
   expect(photos).toHaveLength(1)
   expect(photos[0]).toMatchObject({ id: result.id, name: 'pending.png', previewSrc: expect.any(String) })
@@ -324,6 +349,26 @@ test('rejects corrupt images without writing metadata', async () => {
   const response = await fetch(new URL('/api/upload', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin }, body: form })
   expect(response.status).toBe(400)
   expect(await (await fetch(new URL('/api/photos', base))).json()).toEqual([])
+})
+
+test('upload keys make concurrent requests and retries idempotent and reject changed files', async () => {
+  const key = crypto.randomUUID()
+  const bytes = await new Bun.Image(bitmap(91, 47)).png().blob()
+  const send = (blob: Blob, uploadKey: string = key) => {
+    const form = new FormData()
+    form.set('file', new File([blob], 'retry.png', { type: 'image/png' }))
+    return fetch(new URL('/api/upload', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin, 'Idempotency-Key': uploadKey }, body: form })
+  }
+  const [first, second] = await Promise.all([send(bytes), send(bytes)])
+  const { id } = await first.json()
+  expect((await second.json()).id).toBe(id)
+  await waitForProcessing()
+  const photos: Photo[] = await (await fetch(new URL('/api/photos', base))).json()
+  expect(photos.filter(photo => photo.id === id)).toHaveLength(1)
+  const changed = await new Bun.Image(bitmap(92, 47)).png().blob()
+  expect((await send(changed)).status).toBe(409)
+  expect((await send(bytes, 'invalid')).status).toBe(400)
+  await fetch(new URL(`/api/photos/${id}`, base), { method: 'DELETE', headers: { cookie } })
 })
 
 test('rejects excess uploads before reading their bodies and frees slots on disconnect', async () => {
