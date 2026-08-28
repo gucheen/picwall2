@@ -2,11 +2,13 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { Photo, PhotoPage } from '../../types/shared_types'
+import { normalizePhotoTitle, normalizePhotoLocation } from '../../types/photo-metadata'
 import { decodeCursor, encodeCursor, type PageOptions } from '../pagination'
 import type { Asset, Variant } from './model'
 
 export interface PhotoRecord {
   id: string; asset_hash: string; name: string; date: string | null; exif: string | null;
+  title: string | null; location: string | null;
   created_at: string; deleted_at: number | null; metadata_locked: number
 }
 export interface Job {
@@ -15,11 +17,12 @@ export interface Job {
 }
 export interface Metadata {
   id?: string; name: string; date?: string; exif?: Photo['exif']; tags?: string[];
+  title?: Photo['title']; location?: Photo['location'];
   created_at?: string; deleted_at?: number | null; preserveMetadata?: boolean
 }
 export interface Manifest {
   version: 2; exported_at: string; assets: Asset[]; variants: Variant[];
-  photos: (PhotoRecord & { tags: string[] })[]
+  photos: (Omit<PhotoRecord, 'title' | 'location'> & Partial<Pick<PhotoRecord, 'title' | 'location'>> & { tags: string[] })[]
 }
 interface PhotoView extends PhotoRecord {
   original_key: string; width: number; height: number; thumbnail_key: string | null; preview_key: string | null;
@@ -52,8 +55,11 @@ export class Catalog {
       this.db = new Database(path.join(root, 'catalog.sqlite'), { create: true, strict: true })
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;')
       const version = this.db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version
-      if (version !== 0 && version !== 2) throw new Error('Unsupported catalog version: ' + version)
-      this.db.exec(schema)
+      if (![0, 2, 3].includes(version)) throw new Error('Unsupported catalog version: ' + version)
+      this.db.transaction(() => {
+        if (version === 2) this.db.exec('ALTER TABLE photos ADD COLUMN title TEXT; ALTER TABLE photos ADD COLUMN location TEXT;')
+        this.db.exec(schema)
+      })()
       const previous = this.setting('object-store')
       if (previous && previous !== identity) throw new Error('Object store does not match this catalog')
       this.setSetting('object-store', identity)
@@ -80,9 +86,12 @@ export class Catalog {
     this.db.transaction(() => {
       this.db.query('INSERT OR IGNORE INTO assets VALUES (?,?,?,?,?,?,?,?)').run(
         asset.hash, asset.original_key, asset.mime, asset.bytes, asset.width, asset.height, null, asset.created_at)
-      this.db.query('INSERT INTO photos VALUES (?,?,?,?,?,?,?,?)').run(id, asset.hash, metadata.name,
+      const location = metadata.location === undefined ? null : normalizePhotoLocation(metadata.location)
+      this.db.query(`INSERT INTO photos (id,asset_hash,name,date,exif,created_at,deleted_at,metadata_locked,title,location)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(id, asset.hash, metadata.name,
         metadata.date ?? null, metadata.exif ? JSON.stringify(metadata.exif) : null,
-        metadata.created_at ?? new Date().toISOString(), metadata.deleted_at ?? null, metadata.preserveMetadata ? 1 : 0)
+        metadata.created_at ?? new Date().toISOString(), metadata.deleted_at ?? null, metadata.preserveMetadata ? 1 : 0,
+        metadata.title === undefined ? null : normalizePhotoTitle(metadata.title), location ? JSON.stringify(location) : null)
       this.updateTags(id, metadata.tags ?? [])
       if (this.asset(asset.hash)!.active_recipe !== generation) this.enqueue(asset.hash, generation)
       if (source) this.db.query('INSERT INTO imports VALUES (?,?,?)').run(source, id, asset.hash)
@@ -109,6 +118,12 @@ export class Catalog {
     this.db.transaction(() => {
       for (const { id, partial } of updates) {
         if (!this.record(id)) throw new Error('Photo not found')
+        if (Object.hasOwn(partial, 'title')) this.db.query('UPDATE photos SET title=? WHERE id=?')
+          .run(normalizePhotoTitle(partial.title), id)
+        if (Object.hasOwn(partial, 'location')) {
+          const location = normalizePhotoLocation(partial.location)
+          this.db.query('UPDATE photos SET location=? WHERE id=?').run(location ? JSON.stringify(location) : null, id)
+        }
         if (Object.hasOwn(partial, 'tags')) this.updateTags(id, partial.tags ?? [])
         if (Object.hasOwn(partial, 'name')) {
           if (typeof partial.name !== 'string' || !partial.name.length || partial.name.length > 4096) throw new Error('Invalid photo name')
@@ -177,6 +192,7 @@ export class Catalog {
   }
   private map(record: PhotoView): Photo {
     return { id: record.id, name: record.name, src: '/media/' + record.original_key, width: record.width, height: record.height,
+      title: record.title ?? undefined, location: record.location ? JSON.parse(record.location) : undefined,
       thumbnailSrc: record.thumbnail_key ? '/media/' + record.thumbnail_key : undefined,
       previewSrc: record.preview_key ? '/media/' + record.preview_key : undefined,
       previewWidth: record.preview_width ?? undefined, previewHeight: record.preview_height ?? undefined,
@@ -194,6 +210,8 @@ export class Catalog {
 
 export function validateMetadata(metadata: Metadata) {
   if (!metadata || typeof metadata.name !== 'string' || !metadata.name || metadata.name.length > 4096) throw new Error('Invalid photo name')
+  if (metadata.title !== undefined) normalizePhotoTitle(metadata.title)
+  if (metadata.location !== undefined) normalizePhotoLocation(metadata.location)
   if (metadata.id !== undefined && (typeof metadata.id !== 'string' || !metadata.id || metadata.id.length > 512)) throw new Error('Invalid photo ID')
   if (metadata.date !== undefined && typeof metadata.date !== 'string') throw new Error('Invalid photo date')
   if (metadata.created_at !== undefined && (typeof metadata.created_at !== 'string' || !Number.isFinite(Date.parse(metadata.created_at)))) throw new Error('Invalid creation date')
@@ -205,7 +223,7 @@ export function validateMetadata(metadata: Metadata) {
 const schema = [
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS assets (hash TEXT PRIMARY KEY, original_key TEXT NOT NULL UNIQUE, mime TEXT NOT NULL, bytes INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, active_recipe TEXT, created_at INTEGER NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS photos (id TEXT PRIMARY KEY, asset_hash TEXT NOT NULL REFERENCES assets(hash), name TEXT NOT NULL, date TEXT, exif TEXT, created_at TEXT NOT NULL, deleted_at INTEGER, metadata_locked INTEGER NOT NULL DEFAULT 0)',
+  'CREATE TABLE IF NOT EXISTS photos (id TEXT PRIMARY KEY, asset_hash TEXT NOT NULL REFERENCES assets(hash), name TEXT NOT NULL, date TEXT, exif TEXT, created_at TEXT NOT NULL, deleted_at INTEGER, metadata_locked INTEGER NOT NULL DEFAULT 0, title TEXT, location TEXT)',
   'CREATE INDEX IF NOT EXISTS photos_asset ON photos(asset_hash)',
   "CREATE INDEX IF NOT EXISTS photos_order ON photos(COALESCE(date,'') DESC,created_at DESC,id DESC) WHERE deleted_at IS NULL",
   'CREATE TABLE IF NOT EXISTS tags (name TEXT PRIMARY KEY)',
@@ -215,5 +233,5 @@ const schema = [
   "CREATE TABLE IF NOT EXISTS jobs (asset_hash TEXT NOT NULL REFERENCES assets(hash) ON DELETE CASCADE, recipe TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','running','failed','complete')), attempts INTEGER NOT NULL, error TEXT, updated_at INTEGER NOT NULL, PRIMARY KEY(asset_hash,recipe))",
   'CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(recipe,status,updated_at,asset_hash)',
   'CREATE TABLE IF NOT EXISTS imports (source TEXT PRIMARY KEY, photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE, hash TEXT NOT NULL)',
-  'PRAGMA user_version=2',
+  'PRAGMA user_version=3',
 ].join(';')

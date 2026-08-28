@@ -133,8 +133,9 @@ test('GC defaults to dry-run and protects active references, retained trash and 
 })
 
 test('backups preserve UUIDs, metadata and deleted records and restore regenerates derivatives', async () => {
-  const first = await library.ingest(png, { name: '备份.png', tags: ['旅行'], date: '2022-01-02 03:04:05', exif: { model: 'Camera' }, preserveMetadata: true })
-  const second = await library.ingest(png, { name: 'copy.png' })
+  const first = await library.ingest(png, { name: '备份.png', title: '湖边日落', location: { name: '西湖', latitude: 30.2431, longitude: 120.15 },
+    tags: ['旅行'], date: '2022-01-02 03:04:05', exif: { model: 'Camera' }, preserveMetadata: true })
+  const second = await library.ingest(png, { name: 'copy.png', title: 'Deleted title', location: { name: 'Hangzhou' } })
   expect(duplicates(library)[0]?.photoIds.sort()).toEqual([first, second].sort())
   library.catalog.delete(second, 123456789)
   const manifest = library.catalog.manifest()
@@ -154,6 +155,22 @@ test('backups preserve UUIDs, metadata and deleted records and restore regenerat
     expect(restored.catalog.record(second)?.deleted_at).toBe(123456789)
     expect((await checkLibrary(restored)).ok).toBe(true)
     await expect(restoreLibrary(restored, backup)).rejects.toThrow('empty')
+  } finally { await restored.close() }
+})
+
+test('restores older manifests without title or location fields', async () => {
+  const id = await library.ingest(png, { name: 'old.png', tags: ['keep'] })
+  const backup = path.join(directory, 'old-backup')
+  await backupLibrary(library, backup)
+  const manifest = library.catalog.manifest()
+  for (const photo of manifest.photos) { delete photo.title; delete photo.location }
+  await Bun.write(path.join(backup, 'manifest.json'), JSON.stringify(manifest))
+  const root = path.join(directory, 'restored-old')
+  const restored = new Library(root, new LocalObjects(path.join(root, 'objects')))
+  try {
+    await restoreLibrary(restored, backup)
+    await restored.recover()
+    expect(restored.catalog.get(id)).toEqual(library.catalog.get(id))
   } finally { await restored.close() }
 })
 

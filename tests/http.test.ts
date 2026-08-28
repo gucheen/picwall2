@@ -219,6 +219,48 @@ test('rejects malformed pagination without changing the legacy list contract', a
   expect(Array.isArray(await (await fetch(new URL('/api/photos', base))).json())).toBe(true)
 })
 
+test('edits public title and location independently, validates mutations, and invalidates list and page caches', async () => {
+  const form = new FormData()
+  form.set('file', new File([await new Bun.Image(bitmap(64, 32)).png().blob()], 'caption.png', { type: 'image/png' }))
+  const uploaded = await fetch(new URL('/api/upload', base), { method: 'POST', headers: { cookie, origin: new URL(base).origin }, body: form })
+  expect(uploaded.status).toBe(200)
+  const { id } = await uploaded.json()
+  const endpoint = new URL(`/api/photos/${id}`, base)
+  const patch = (body: unknown) => fetch(endpoint, { method: 'PATCH', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const list = await fetch(new URL('/api/photos', base))
+  const original = (await list.json())[0]
+  const page = await fetch(new URL('/api/photos?limit=1', base))
+  await page.text()
+  expect((await fetch(endpoint, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"title":"blocked"}' })).status).toBe(401)
+  const location = { name: '西湖', latitude: 30.2431, longitude: 120.15 }
+  expect((await patch({ title: '  湖边日落  ', location, tags: ['travel'] })).status).toBe(200)
+  const changed = await fetch(new URL('/api/photos', base), { headers: { 'If-None-Match': list.headers.get('etag')! } })
+  expect(changed.status).toBe(200)
+  expect((await changed.json())[0]).toMatchObject({ ...original, title: '湖边日落', location, tags: ['travel'] })
+  const changedPage = await fetch(new URL('/api/photos?limit=1', base), { headers: { 'If-None-Match': page.headers.get('etag')! } })
+  expect(changedPage.status).toBe(200)
+  expect((await changedPage.json()).photos[0]).toMatchObject({ title: '湖边日落', location })
+  expect((await patch({ title: 'New title' })).status).toBe(200)
+  expect((await patch({ location: { name: '  Hangzhou  ' } })).status).toBe(200)
+  for (const body of [null, [], {}, 'text', { name: 'rename.png' }, { title: 42 }, { title: 'x'.repeat(201) },
+    { title: 'Must not save', location: { latitude: 1 } }, { location: { latitude: 0, longitude: 181 } },
+    { location: { latitude: '30', longitude: 120 } }, { location: { name: 'x', url: 'https://example.com' } }]) {
+    expect((await patch(body)).status).toBe(400)
+  }
+  expect((await (await fetch(new URL('/api/photos', base))).json())[0]).toMatchObject({
+    name: 'caption.png', title: 'New title', location: { name: 'Hangzhou' }, tags: ['travel'],
+  })
+  expect((await patch({ location: { latitude: 0, longitude: 0 } })).status).toBe(200)
+  expect((await (await fetch(new URL('/api/photos', base))).json())[0].location).toEqual({ latitude: 0, longitude: 0 })
+  expect((await patch({ title: '', location: null })).status).toBe(200)
+  const cleared = (await (await fetch(new URL('/api/photos', base))).json())[0]
+  expect(cleared.title).toBeUndefined()
+  expect(cleared.location).toBeUndefined()
+  expect(cleared.tags).toEqual(['travel'])
+  expect((await fetch(endpoint, { method: 'DELETE', headers: { cookie, origin: new URL(base).origin } })).status).toBe(200)
+  expect((await patch({ title: 'Deleted photo' })).status).toBe(404)
+})
+
 test('same Unicode names keep distinct IDs and shared media survives trash and restoration', async () => {
   const png = await new Bun.Image(bitmap(96, 48)).png().blob()
   const ids: string[] = []

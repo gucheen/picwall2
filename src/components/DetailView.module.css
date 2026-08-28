@@ -144,11 +144,16 @@
 }
 
 .title {
+  overflow-wrap: anywhere;
   font-size: 1.25rem;
   font-weight: 300;
   color: #fff;
   margin-bottom: 1.5rem;
 }
+
+.coordinates { color: #aaa; font-size: 0.8rem; margin-top: 0.4rem; }
+.mapLink { display: inline-block; color: #ddd; font-size: 0.875rem; margin-top: 0.75rem; text-decoration: underline; text-underline-offset: 3px; }
+.mapLink:hover { color: #fff; }
 
 .groupContainer {
   display: grid;

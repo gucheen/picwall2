@@ -3,6 +3,36 @@ import { layoutPhotos, visiblePhotos } from '../src/lib/masonry'
 import { detailSource, photoSrcSet } from '../src/lib/photo-sources'
 import { selectEncoding } from '../server/static-assets'
 import { photo } from './helpers'
+import { normalizePhotoLocation, normalizePhotoTitle, photoMapUrl, locationLabel } from '../types/photo-metadata'
+
+test('photo captions accept clearing and map links encode names or prefer exact coordinates including zero', () => {
+  expect(normalizePhotoTitle('  湖边日落  ')).toBe('湖边日落')
+  expect(normalizePhotoTitle('  ')).toBeNull()
+  expect(normalizePhotoTitle(null)).toBeNull()
+  expect(normalizePhotoLocation({ name: '  ' })).toBeNull()
+  expect(normalizePhotoLocation(null)).toBeNull()
+  const location = normalizePhotoLocation({ name: ' 西湖 & 湖滨 / #1 ' })!
+  const url = new URL(photoMapUrl(location))
+  expect(url.origin).toBe('https://www.google.com')
+  expect(url.searchParams.get('api')).toBe('1')
+  expect(url.searchParams.get('query')).toBe('西湖 & 湖滨 / #1')
+  expect(url.hash).toBe('')
+  expect(locationLabel(location)).toBe('西湖 & 湖滨 / #1')
+  const coordinates = normalizePhotoLocation({ name: 'Equator', latitude: 0, longitude: 0 })!
+  expect(new URL(photoMapUrl(coordinates)).searchParams.get('query')).toBe('0,0')
+  expect(locationLabel({ latitude: -90, longitude: 180 })).toBe('-90, 180')
+  expect(normalizePhotoLocation({ latitude: -90, longitude: 180 })).toEqual({ latitude: -90, longitude: 180 })
+})
+
+test('rejects invalid photo titles and incomplete or out-of-range coordinates', () => {
+  for (const title of [42, {}, [], undefined, 'x'.repeat(201)]) expect(() => normalizePhotoTitle(title)).toThrow()
+  for (const location of ['place', [], false, { name: 1 }, { name: 'x'.repeat(201) },
+    { latitude: 1 }, { longitude: 1 }, { latitude: '0', longitude: 0 }, { latitude: null, longitude: 0 },
+    { latitude: NaN, longitude: 0 }, { latitude: 0, longitude: Infinity },
+    { latitude: 90.1, longitude: 0 }, { latitude: -90.1, longitude: 0 },
+    { latitude: 0, longitude: 180.1 }, { latitude: 0, longitude: -180.1 },
+    { name: 'place', url: 'javascript:alert(1)' }]) expect(() => normalizePhotoLocation(location)).toThrow()
+})
 
 test('masonry keeps page appends stable and bounds visible cards across a large collection', () => {
   const photos = Array.from({ length: 10_000 }, (_, index) => ({ ...photo(`${index}.jpg`), width: 600, height: index % 2 ? 400 : 800 }))

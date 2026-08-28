@@ -8,6 +8,8 @@ import { pageOptions, InvalidPageError } from './pagination'
 import { QueueFullError } from './task-queue'
 import { createAuth } from './auth'
 import { storage, photoDatabase } from './storage'
+import type { Photo } from '../types/shared_types'
+import { normalizePhotoTitle, normalizePhotoLocation } from '../types/photo-metadata'
 
 const validId = (id: unknown): id is string => typeof id === 'string'
   && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id)
@@ -101,14 +103,21 @@ app.post('/api/photos/:id/restore', auth.requireAuth, c => {
 app.patch('/api/photos/:id', auth.requireAuth, async (c) => {
   const id = c.req.param('id')
   if (!validId(id)) return c.json({ error: 'Invalid photo ID' }, 400)
-  const body = await c.req.json<{ tags?: unknown }>().catch(() => null)
-
-  if (!body || !validTags(body.tags)) {
-    return c.json({ error: 'Invalid tags' }, 400)
-  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length
+    || Object.keys(body).some(key => !['tags', 'title', 'location'].includes(key))) return c.json({ error: 'Invalid photo update' }, 400)
+  const updates: Partial<Photo> = {}
+  try {
+    if (Object.hasOwn(body, 'tags')) {
+      if (!validTags(body.tags)) return c.json({ error: 'Invalid tags' }, 400)
+      updates.tags = body.tags
+    }
+    if (Object.hasOwn(body, 'title')) updates.title = normalizePhotoTitle(body.title)
+    if (Object.hasOwn(body, 'location')) updates.location = normalizePhotoLocation(body.location)
+  } catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Invalid photo update' }, 400) }
   if (!photoDatabase.record(id) || photoDatabase.record(id)!.deleted_at !== null) return c.json({ error: 'Photo not found' }, 404)
 
-  await updatePhoto(id, { tags: body.tags })
+  await updatePhoto(id, updates)
   return c.json({ success: true })
 })
 

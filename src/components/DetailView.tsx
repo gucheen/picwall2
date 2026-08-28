@@ -4,6 +4,7 @@ import type { Photo } from '../../types/shared_types'
 import { loadOriginalImage } from '../lib/image-loader'
 import { detailSource, photoSrcSet } from '../lib/photo-sources'
 import styles from './DetailView.module.css'
+import { locationLabel, photoMapUrl } from '../../types/photo-metadata'
 
 interface DetailViewProps {
   photo: Photo
@@ -113,7 +114,7 @@ export default function DetailView({
               srcSet={originalId === photo.id ? undefined : photoSrcSet(photo)}
               sizes="(min-width: 768px) calc(100vw - 384px), calc(100vw - 32px)"
               decoding="async"
-              alt={photo.name}
+              alt={photo.title || photo.name}
               className={styles.image}
               width={photo.width}
               height={photo.height}
@@ -136,9 +137,19 @@ export default function DetailView({
           }}
         >
           <div className={styles.sidebarContent}>
-            <h2 className={styles.title}>Info</h2>
+            <h2 className={styles.title}>{photo.title || photo.name}</h2>
 
             <div className={styles.groupContainer}>
+              {photo.location && <div className={styles.metaGroup}>
+                <div className={styles.label}>Location</div>
+                <div className={styles.value}>{locationLabel(photo.location)}</div>
+                {photo.location.name && photo.location.latitude !== undefined && <p className={styles.coordinates}>
+                  {photo.location.latitude}, {photo.location.longitude}
+                </p>}
+                <a className={styles.mapLink} href={photoMapUrl(photo.location)} target="_blank" rel="noopener noreferrer">
+                  {photo.location.latitude !== undefined ? 'View on Google Maps' : 'Search on Google Maps'} ↗
+                </a>
+              </div>}
               <MetaGroup
                 label="Camera"
                 value={photo.exif?.model || 'Unknown Camera'}

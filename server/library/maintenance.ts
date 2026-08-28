@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite'
 import { link, mkdir, open, realpath, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import type { Photo } from '../../types/shared_types'
+import { normalizePhotoLocation, normalizePhotoTitle } from '../../types/photo-metadata'
 import { validateMetadata, type Manifest, type Metadata } from './catalog'
 import type { Library } from './service'
 import { LocalObjects } from './objects'
@@ -313,11 +314,13 @@ function validateManifest(value: unknown): asserts value is Manifest {
       || (photo.date !== null && typeof photo.date !== 'string')
       || (photo.deleted_at !== null && !Number.isFinite(photo.deleted_at))
       || !Array.isArray(photo.tags) || photo.tags.length > 100 || photo.tags.some(tag => typeof tag !== 'string' || tag.length > 256)
-      || (photo.exif !== null && typeof photo.exif !== 'string')) throw new Error('Invalid or duplicate manifest photo')
+      || (photo.exif !== null && typeof photo.exif !== 'string')
+      || (photo.location != null && typeof photo.location !== 'string')) throw new Error('Invalid or duplicate manifest photo')
     const exif: unknown = photo.exif !== null ? JSON.parse(photo.exif) : undefined
     if (exif !== undefined && (!exif || typeof exif !== 'object' || Array.isArray(exif))) throw new Error('Invalid manifest EXIF')
     validateExif(exif)
     validateMetadata({ id: photo.id, name: photo.name, date: photo.date ?? undefined,
+      title: photo.title, location: photo.location != null ? JSON.parse(photo.location) : undefined,
       exif: exif as Photo['exif'], tags: photo.tags, created_at: photo.created_at, deleted_at: photo.deleted_at })
     ids.add(photo.id)
   }
@@ -350,9 +353,11 @@ export async function restoreLibrary(library: Library, backupDirectory: string):
       library.catalog.enqueue(asset.hash, recipeId)
     }
     for (const photo of manifest.photos) {
+      const location = normalizePhotoLocation(photo.location == null ? null : JSON.parse(photo.location))
       library.catalog.db.query(`INSERT INTO photos
-        (id,asset_hash,name,date,exif,created_at,deleted_at,metadata_locked) VALUES (?,?,?,?,?,?,?,?)`)
-        .run(photo.id, photo.asset_hash, photo.name, photo.date, photo.exif, photo.created_at, photo.deleted_at, photo.metadata_locked ? 1 : 0)
+        (id,asset_hash,name,date,exif,created_at,deleted_at,metadata_locked,title,location) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(photo.id, photo.asset_hash, photo.name, photo.date, photo.exif, photo.created_at, photo.deleted_at, photo.metadata_locked ? 1 : 0,
+          normalizePhotoTitle(photo.title ?? null), location ? JSON.stringify(location) : null)
       for (const tag of new Set(photo.tags)) {
         library.catalog.db.query('INSERT OR IGNORE INTO tags(name) VALUES (?)').run(tag)
         library.catalog.db.query('INSERT INTO photo_tags(photo_id,tag) VALUES (?,?)').run(photo.id, tag)

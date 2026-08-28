@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react'
 import type { Photo } from '../../types/shared_types'
 import styles from './Admin.module.css'
+import PhotoEditor from './PhotoEditor'
+import { locationLabel } from '../../types/photo-metadata'
 
 export default function Admin() {
   const [photos, setPhotos] = useState<Photo[]>([])
   const [trash, setTrash] = useState<(Photo & { deleted_at: number })[]>([])
   const [jobs, setJobs] = useState<{ asset_hash: string; status: string; error: string | null }[]>([])
   const [notice, setNotice] = useState('')
+  const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
@@ -355,7 +358,8 @@ export default function Admin() {
                 />
               </th>
               <th>Thumbnail</th>
-              <th>Filename</th>
+              <th>Title / Filename</th>
+              <th>Location</th>
               <th>Date</th>
               <th>Tags</th>
               <th>Actions</th>
@@ -387,48 +391,24 @@ export default function Admin() {
                 <td>
                   <img
                     src={photo.thumbnailSrc || photo.src}
-                    alt={photo.name}
+                    alt={photo.title || photo.name}
                     className={styles.thumbnail}
                   />
                 </td>
-                <td>{photo.name}</td>
+                <td className={styles.photoDescription}>
+                  {photo.title && <strong>{photo.title}</strong>}
+                  <span>{photo.name}</span>
+                </td>
+                <td className={styles.location}>{photo.location ? locationLabel(photo.location) : '—'}</td>
                 <td>{photo.date || '-'}</td>
                 <td>{photo.tags?.join(', ') || '-'}</td>
                 <td>
                   <button
-                    onClick={() => {
-                      const currentTags = photo.tags?.join(', ') || ''
-                      const newTagsStr = prompt(
-                        'Enter tags (comma separated):',
-                        currentTags,
-                      )
-                      if (newTagsStr !== null && newTagsStr !== currentTags) {
-                        const newTags = newTagsStr
-                          .split(',')
-                          .map((t) => t.trim())
-                          .filter(Boolean)
-                        fetch(`/api/photos/${photo.id}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ tags: newTags }),
-                        })
-                          .then((res) => res.json())
-                          .then((data) => {
-                            if (data.success) {
-                              const updatedPhotos = photos.map((p) =>
-                                p.id === photo.id ? { ...p, tags: newTags } : p,
-                              )
-                              setPhotos(updatedPhotos)
-                            } else {
-                              alert('Failed to update tags')
-                            }
-                          })
-                      }
-                    }}
-                    className={styles.editButton || styles.deleteButton}
+                    onClick={() => setEditingPhoto(photo)}
+                    className={styles.editButton}
                     style={{ marginRight: '8px' }}
                   >
-                    Tags
+                    Edit
                   </button>
                   <button
                     onClick={() => handleDelete(photo.id)}
@@ -452,6 +432,12 @@ export default function Admin() {
           </div>
         ))}
       </section>
+      {editingPhoto && <PhotoEditor key={editingPhoto.id} photo={editingPhoto} onClose={() => setEditingPhoto(null)}
+        onSaved={updated => {
+          setPhotos(previous => previous.map(photo => photo.id === updated.id ? updated : photo))
+          setEditingPhoto(null)
+          setNotice('Photo details saved.')
+        }} />}
     </div>
   )
 }

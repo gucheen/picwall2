@@ -25,6 +25,40 @@ afterEach(async () => {
 })
 
 describe('content-addressed library', () => {
+  test('upgrades version 2 catalogs without changing existing photos and persists edited metadata', async () => {
+    const id = await library.ingest(png, { name: 'original.png', tags: ['keep'], date: '2025-02-03' })
+    const original = library.catalog.get(id)!
+    library.catalog.db.exec('ALTER TABLE photos DROP COLUMN title; ALTER TABLE photos DROP COLUMN location; PRAGMA user_version=2;')
+    await library.close()
+    library = new Library(directory, objects)
+    expect(library.catalog.get(id)).toEqual(original)
+    const location = { name: '西湖', latitude: 30.2431, longitude: 120.15 }
+    library.catalog.updateMany([{ id, partial: { title: '  湖边日落  ', location } }])
+    expect(library.catalog.get(id)).toEqual({ ...original, title: '湖边日落', location })
+    await library.close()
+    library = new Library(directory, objects)
+    expect(library.catalog.page({ limit: 1 }).photos[0]).toEqual({ ...original, title: '湖边日落', location })
+    await library.rebuild()
+    expect(library.catalog.get(id)?.location).toEqual(location)
+    library.catalog.updateMany([{ id, partial: { title: null, location: null } }])
+    expect(library.catalog.get(id)).toEqual(original)
+  })
+
+  test('title and location edits stay independent for shared assets and invalid edits roll back', async () => {
+    const first = await library.ingest(png, { name: 'first.png', title: 'First', location: { name: 'Hangzhou' }, tags: ['keep'] })
+    const second = await library.ingest(png, { name: 'second.png' })
+    const before = library.catalog.get(first)!
+    expect(() => library.catalog.updateMany([{ id: first, partial: { title: 'Changed', tags: ['changed'], location: { latitude: 91, longitude: 0 } } }])).toThrow()
+    expect(library.catalog.get(first)).toEqual(before)
+    library.catalog.updateMany([{ id: second, partial: { title: 'Second', location: { latitude: 0, longitude: 0 } } }])
+    expect(library.catalog.get(first)).toEqual(before)
+    expect(library.catalog.get(second)).toMatchObject({ title: 'Second', location: { latitude: 0, longitude: 0 } })
+    library.catalog.delete(first)
+    expect(library.catalog.trash()[0]).toMatchObject(before)
+    library.catalog.restore(first)
+    expect(library.catalog.get(first)).toEqual(before)
+  })
+
   test('same names get independent UUIDs and different original objects without overwriting', async () => {
     const changed = new Uint8Array(await new Bun.Image(bitmap(48, 24)).png().bytes())
     const first = await library.ingest(png, { name: '同名 照片.png', tags: ['first'] })

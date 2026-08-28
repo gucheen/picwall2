@@ -6,6 +6,7 @@ A photo wall for browsing and sharing your photos, built with Bun, Hono, and Rea
 
 - Responsive photo wall with tag filters and infinite scrolling.
 - Photo details with camera metadata, previews, and access to originals.
+- Editable photo titles and location markers with external map links.
 - Admin page for batch uploads, tagging, and deletion.
 - Automatic WebP thumbnails and previews; identical originals share storage.
 - Local disk or S3-compatible object storage.
@@ -49,7 +50,8 @@ Compose persists `./data` on the host: `library-v2/` contains the photo catalog 
 ## Using PicWall2
 
 - **Browse:** open `/`, filter by tag, and click a photo to see its details. Choose **Load original** or **Open original** for the full image.
-- **Manage:** open `/admin` to upload photos, edit tags, or delete photos individually or in batches.
+- **Manage:** open `/admin` to upload photos, edit their details, or move photos to trash. Choose **Edit** beside a photo to set its title, location, and tags; batch tagging remains available.
+- **Locations:** enter a place name and optionally both latitude and longitude in WGS84 decimal degrees. **View on Google Maps** opens a pin at the coordinates; a name alone offers **Search on Google Maps**. Leave fields blank to remove them. Titles do not rename original files. Saved locations are public; GPS is not automatically copied into the location marker.
 - **Manage Passkeys:** open `/admin/security` to add or remove keys. Keep a backup key; there is no password or email fallback.
 - **Import a folder, back up, or recover access:** see the [operations guide](docs/operations.md).
 

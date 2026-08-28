@@ -9,10 +9,18 @@ export interface PhotoExif {
   date?: string
 }
 
+export interface PhotoLocation {
+  name?: string
+  latitude?: number
+  longitude?: number
+}
+
 export interface Photo {
   id: string
   src: string
   name: string
+  title?: string | null
+  location?: PhotoLocation | null
   width?: number
   height?: number
   exif?: PhotoExif

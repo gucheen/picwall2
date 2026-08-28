@@ -73,6 +73,15 @@
     background: #cc0000;
 }
 
+.editButton {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid #666;
+    border-radius: 4px;
+    color: #eee;
+}
+
+.editButton:hover { background: #333; }
+
 .fileInput {
     display: none;
 }
@@ -80,11 +89,12 @@
 .tableWrapper {
     background: #1a1a1a;
     border-radius: 8px;
-    overflow: hidden;
+    overflow-x: auto;
 }
 
 .table {
     width: 100%;
+    min-width: 48rem;
     border-collapse: collapse;
 }
 
@@ -190,4 +200,16 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.75rem 0;
+}
+
+.photoDescription { max-width: 20rem; overflow-wrap: anywhere; }
+.photoDescription strong, .photoDescription span { display: block; }
+.photoDescription strong { font-weight: 500; margin-bottom: 0.25rem; }
+.photoDescription span { color: #aaa; font-size: 0.875rem; }
+.location { max-width: 16rem; overflow-wrap: anywhere; }
+
+@media (max-width: 767px) {
+    .container { padding: 1rem; }
+    .header { flex-direction: column; align-items: flex-start; gap: 1rem; }
+    .actions { flex-wrap: wrap; }
 }
