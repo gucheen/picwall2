@@ -183,15 +183,17 @@ export default function DetailView({
             </div>
           </div>
 
-          {detailSource(photo) !== photo.src && originalId !== photo.id && (
-            <button className={styles.closeButton} onClick={() => setOriginalId(photo.id)}>
-              Load original
+          <div className={styles.sidebarActions}>
+            {detailSource(photo) !== photo.src && originalId !== photo.id && (
+              <button className={styles.actionButton} onClick={() => setOriginalId(photo.id)}>
+                Load original
+              </button>
+            )}
+            <a className={styles.actionButton} href={photo.src} target="_blank" rel="noreferrer">Open original</a>
+            <button onClick={onClose} className={styles.actionButton}>
+              Close View
             </button>
-          )}
-          <a className={styles.closeButton} href={photo.src} target="_blank" rel="noreferrer">Open original</a>
-          <button onClick={onClose} className={styles.closeButton}>
-            Close View
-          </button>
+          </div>
         </motion.div>
       </div>
     </motion.div>
