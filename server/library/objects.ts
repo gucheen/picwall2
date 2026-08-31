@@ -6,6 +6,7 @@ import { sha256, validKey, verifyObject } from './model'
 export interface StoredObject { key: string; bytes: number; modified: number }
 export interface ObjectStore {
   identity: string
+  publicUrl?(key: string): string | undefined
   put(key: string, bytes: Uint8Array, mime: string): Promise<void>
   read(key: string): Promise<Uint8Array>
   response(key: string, mime: string): Promise<Response | null>
@@ -111,6 +112,11 @@ export class S3Objects implements ObjectStore {
     if (!validKey(key)) throw new Error('Invalid object key')
     return this.client.file(this.prefix + key)
   }
+  publicUrl(key: string) {
+    if (!this.cdn) return undefined
+    if (!validKey(key)) throw new Error('Invalid object key')
+    return this.cdn.replace(/\/$/, '') + '/' + this.prefix + key
+  }
   async put(key: string, bytes: Uint8Array, mime: string) {
     verifyObject(key, bytes)
     const file = this.file(key)
@@ -134,8 +140,7 @@ export class S3Objects implements ObjectStore {
     const file = this.file(key)
     if (!(await file.exists())) return null
     if (this.cdn || this.presign) {
-      const location = this.cdn ? this.cdn.replace(/\/$/, '') + '/' + this.prefix + key
-        : file.presign({ expiresIn: 300, method: 'GET' })
+      const location = this.publicUrl(key) ?? file.presign({ expiresIn: 300, method: 'GET' })
       return new Response(null, { status: 302, headers: { Location: location, 'Cache-Control': 'private, no-store' } })
     }
     return new Response(file.stream(), { headers: { 'Content-Type': mime } })

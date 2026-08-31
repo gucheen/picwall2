@@ -43,7 +43,8 @@ export class Catalog {
   private lock: Database
   private closed = false
 
-  constructor(readonly root: string, identity: string) {
+  constructor(readonly root: string, identity: string,
+    private readonly mediaUrl: (key: string) => string = key => '/media/' + key) {
     mkdirSync(root, { recursive: true })
     this.lock = new Database(path.join(root, 'writer-lock.sqlite'), { create: true })
     try { this.lock.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE;') }
@@ -214,10 +215,10 @@ export class Catalog {
         FROM photos ORDER BY id`).all().map(({ tag_json, ...row }) => ({ ...row, tags: JSON.parse(tag_json) })) }
   }
   private map(record: PhotoView): Photo {
-    return { id: record.id, name: record.name, src: '/media/' + record.original_key, width: record.width, height: record.height,
+    return { id: record.id, name: record.name, src: this.mediaUrl(record.original_key), width: record.width, height: record.height,
       title: record.title ?? undefined, location: record.location ? JSON.parse(record.location) : undefined,
-      thumbnailSrc: record.thumbnail_key ? '/media/' + record.thumbnail_key : undefined,
-      previewSrc: record.preview_key ? '/media/' + record.preview_key : undefined,
+      thumbnailSrc: record.thumbnail_key ? this.mediaUrl(record.thumbnail_key) : undefined,
+      previewSrc: record.preview_key ? this.mediaUrl(record.preview_key) : undefined,
       previewWidth: record.preview_width ?? undefined, previewHeight: record.preview_height ?? undefined,
       date: record.date ?? undefined, exif: record.exif ? JSON.parse(record.exif) : undefined, tags: JSON.parse(record.tag_json) }
   }

@@ -147,6 +147,21 @@ describe('content-addressed library', () => {
     expect(await objects.read(originalKey(sha256(changed)))).toEqual(changed)
   })
 
+  test('publishes stable CDN URLs directly while other object stores keep application media URLs', async () => {
+    const id = await library.ingest(png, { name: 'cdn.png' })
+    expect(library.catalog.get(id)?.src).toStartWith('/media/')
+    await library.close()
+    const direct = Object.assign(objects, { publicUrl: (key: string) => 'https://cdn.example.test/library-v2/' + key })
+    library = new Library(directory, direct)
+    const photo = library.catalog.get(id)!
+    const variants = new Map(library.catalog.variants().map(variant => [variant.kind, variant.object_key]))
+    expect([photo.src, photo.thumbnailSrc, photo.previewSrc]).toEqual([
+      'https://cdn.example.test/library-v2/' + originalKey(sha256(png)),
+      'https://cdn.example.test/library-v2/' + variants.get('thumbnail'),
+      'https://cdn.example.test/library-v2/' + variants.get('preview'),
+    ])
+  })
+
   test('identical bytes share the asset and variants while photo metadata stays independent', async () => {
     const ids = await Promise.all(['旅行.png', 'second.png', '旅行.png'].map((name, index) =>
       library.ingest(png, { name, tags: [String(index)] })))
@@ -341,6 +356,7 @@ describe('content-addressed library', () => {
       expect(lists[1]!.searchParams.get('continuation-token')).toBe('page-two')
       expect(await (await s3.response(keys[0]!, 'image/png'))?.text()).toBe('first original')
       const signed = new S3Objects(options, prefix, '', true)
+      expect(signed.publicUrl(keys[0]!)).toBeUndefined()
       const redirect = await signed.response(keys[0]!, 'image/png')
       expect(redirect?.status).toBe(302)
       const location = new URL(redirect!.headers.get('location')!)
@@ -348,6 +364,7 @@ describe('content-addressed library', () => {
       expect(location.searchParams.has('X-Amz-Signature')).toBe(true)
       expect(redirect?.headers.get('cache-control')).toBe('private, no-store')
       const cdn = new S3Objects(options, prefix, 'https://cdn.example.test')
+      expect(cdn.publicUrl(keys[0]!)).toBe('https://cdn.example.test/' + prefix + keys[0])
       expect((await cdn.response(keys[0]!, 'image/png'))?.headers.get('location')).toBe('https://cdn.example.test/' + prefix + keys[0])
       await s3.remove(keys[0]!)
       expect(await signed.response(keys[0]!, 'image/png')).toBeNull()

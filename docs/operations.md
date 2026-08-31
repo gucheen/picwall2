@@ -142,7 +142,7 @@ Common errors:
 
 ## Direct image delivery
 
-Images stream through the application unless you set `S3_CDN_URL` or `S3_PRESIGNED_READS=true`. A CDN URL takes precedence; signed reads otherwise redirect to a temporary S3 URL.
+Images stream through the application unless you set `S3_CDN_URL` or `S3_PRESIGNED_READS=true`. With a CDN URL, photo APIs return stable CDN object URLs directly and `/media` remains a redirecting compatibility path. Signed reads instead redirect `/media` to a temporary S3 URL. A CDN URL takes precedence when both settings are enabled.
 
 The CDN or S3 endpoint must be reachable by browsers. **Load original** also needs CORS allowing GET from your site's origin; otherwise use **Open original** or keep application streaming. A private bucket and signed URLs do not make the public gallery private.
 

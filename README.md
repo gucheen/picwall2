@@ -77,7 +77,7 @@ For AWS S3, use the bucket's actual region. Use a dedicated prefix ending in `/`
 
 Photo metadata still lives in the local `data/library-v2/catalog.sqlite`. Once initialized, the catalog is bound to its storage type and, for S3, its endpoint, bucket, and prefix. Changing these settings does not migrate an existing library.
 
-Images stream through the application by default. Optional `S3_CDN_URL` or `S3_PRESIGNED_READS=true` enables direct reads; see [direct image delivery](docs/operations.md#direct-image-delivery) before enabling either.
+Images stream through the application by default. `S3_CDN_URL` makes photo APIs return stable CDN URLs directly, while `S3_PRESIGNED_READS=true` redirects application media URLs to temporary S3 URLs. See [direct image delivery](docs/operations.md#direct-image-delivery) before enabling either.
 
 ## Local development
 

@@ -17,7 +17,7 @@ export class Library {
   private repair = new Set<string>()
 
   constructor(readonly root: string, readonly objects: ObjectStore) {
-    this.catalog = new Catalog(root, objects.identity)
+    this.catalog = new Catalog(root, objects.identity, key => objects.publicUrl?.(key) ?? '/media/' + key)
   }
 
   ingest(bytes: ArrayBuffer | Uint8Array, metadata: Metadata, source?: string, waitForProcessing = true): Promise<string> {
